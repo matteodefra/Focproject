@@ -2,7 +2,7 @@
 /////////////////////SERVER EXAMPLE////////////////////////
 ///////////////////////////////////////////////////////////
 
-// #ifdef SERVER_EXAMPLE
+#ifdef SERVER_EXAMPLE
 
 #include <iostream>
 #include <signal.h>
@@ -96,4 +96,4 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-// #endif
+#endif

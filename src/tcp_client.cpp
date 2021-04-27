@@ -41,9 +41,13 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
     return ret;
 }
 
-
+/**
+ * This function will need to implement secure symmetric communication 
+ * through the symmetric key negotiated in the first part
+ */
 pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
     pipe_ret_t ret;
+    // We must create here before the secure message
     int numBytesSent = send(m_sockfd, msg, size, 0);
     if (numBytesSent < 0 ) { // send failed
         ret.success = false;
@@ -97,10 +101,35 @@ void TcpClient::publishServerDisconnected(const pipe_ret_t & ret) {
     }
 }
 
+/**
+ * First function that need to be implemented: the starting client,
+ * after connection, will first authenticate, with a public key preinstalled 
+ * on the server. The private key will be inside each client protected by a
+ * password. After the autenthication, if everything went well client and 
+ * server will negotiate a session key to use for their communication
+ */
+void TcpClient::authenticateThroughServer() {
+    // Send public key, authentication
+    // Then symmetric session key negotiation
+    return;
+}
+
+/**
+ * This function will ask server for all connected clients.
+ * Need to implement secure communication through symmetric key
+ */
+void TcpClient::displayAllClients() {
+    return;
+}
+
+
 /*
  * Receive server packets, and notify user
  */
 void TcpClient::ReceiveTask() {
+
+    // Whenever client thread starts, the first thing client will do is the authentication
+    authenticateThroughServer();
 
     while(!stop) {
         char msg[MAX_PACKET_SIZE];
@@ -118,6 +147,7 @@ void TcpClient::ReceiveTask() {
             finish();
             break;
         } else {
+            // Based on message received, we need to perform some action
             publishServerMsg(msg, numOfBytesReceived);
         }
     }

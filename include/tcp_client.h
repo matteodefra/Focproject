@@ -33,25 +33,50 @@
 class TcpClient
 {
 private:
+
+    // Socket
     int m_sockfd = 0;
+
+    // Determinate the status of the client thread handler
     bool stop = false;
+    // Server address
     struct sockaddr_in m_server;
+    // Publish-Subscribe: list of all subscribers of this client
     std::vector<client_observer_t> m_subscibers;
+    // Thread handler
     std::thread * m_receiveTask = nullptr;
 
+    // Client will also have a private key protected by a password
+
+    // Print the server message on stdout
     void publishServerMsg(const char * msg, size_t msgSize);
+    // Print information about server disconnection
     void publishServerDisconnected(const pipe_ret_t & ret);
+    // It is called each time a packet arrive from the server
     void ReceiveTask();
+    // Clean the thread handler
     void terminateReceiveThread();
 
 public:
     ~TcpClient();
+
+    /** Function used to connect to the server (here security authentication  
+     * must be added). sendMsg of course will implement secure communication
+     * (through the symmetric exchanged after the authentication)
+     */
     pipe_ret_t connectTo(const std::string & address, int port);
     pipe_ret_t sendMsg(const char * msg, size_t size);
 
+    // Function must be called at client start in order to authenticate 
+    void authenticateThroughServer();
+
+    // Display all clients connected 
+    void displayAllClients();
+
+    // To subscribe client, publish 
     void subscribe(const client_observer_t & observer);
     void unsubscribeAll();
-    void publish(const char * msg, size_t msgSize);
+    // void publish(const char * msg, size_t msgSize);
 
     pipe_ret_t finish();
 };

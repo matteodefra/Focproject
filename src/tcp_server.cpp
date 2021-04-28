@@ -21,12 +21,25 @@ void TcpServer::printClients() {
     }
 }
 
+
+/**
+ * Server will receive authentication from the client and will check its public key 
+ * (which is stored from start as guideline). Than will communicate its certificate 
+ * authority in order to prove its affidability. Then symmetric key is negotiated
+ */
+void authenticateServer() {
+    return;
+}
+
+
 /*
  * Receive client packets, and notify user
  */
 void TcpServer::receiveTask(/*TcpServer *context*/) {
 
     Client * client = &m_clients.back();
+
+    authenticateServer();
 
     while(client->isConnected()) {
         char msg[MAX_PACKET_SIZE];
@@ -44,6 +57,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             deleteClient(*client);
             break;
         } else {
+            // Discretize based on the received message
             publishClientMsg(*client, msg, numOfBytesReceived);
         }
     }

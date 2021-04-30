@@ -72,11 +72,11 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 }
 
 void TcpClient::subscribe(const client_observer_t & observer) {
-    m_subscibers.push_back(observer);
+    m_subscribers.push_back(observer);
 }
 
 void TcpClient::unsubscribeAll() {
-    m_subscibers.clear();
+    m_subscribers.clear();
 }
 
 /*
@@ -86,9 +86,9 @@ void TcpClient::unsubscribeAll() {
  * the specific observer requested IP
  */
 void TcpClient::publishServerMsg(const char * msg, size_t msgSize) {
-    for (uint i=0; i<m_subscibers.size(); i++) {
-        if (m_subscibers[i].incoming_packet_func != NULL) {
-            (*m_subscibers[i].incoming_packet_func)(msg, msgSize);
+    for (uint i=0; i<m_subscribers.size(); i++) {
+        if (m_subscribers[i].incoming_packet_func != NULL) {
+            (*m_subscribers[i].incoming_packet_func)(msg, msgSize);
         }
     }
 }
@@ -100,9 +100,9 @@ void TcpClient::publishServerMsg(const char * msg, size_t msgSize) {
  * observer requested IP
  */
 void TcpClient::publishServerDisconnected(const pipe_ret_t & ret) {
-    for (uint i=0; i<m_subscibers.size(); i++) {
-        if (m_subscibers[i].disconnected_func != NULL) {
-            (*m_subscibers[i].disconnected_func)(ret);
+    for (uint i=0; i<m_subscribers.size(); i++) {
+        if (m_subscribers[i].disconnected_func != NULL) {
+            (*m_subscribers[i].disconnected_func)(ret);
         }
     }
 }

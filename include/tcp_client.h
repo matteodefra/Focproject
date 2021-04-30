@@ -42,7 +42,7 @@ private:
     // Server address
     struct sockaddr_in m_server;
     // Publish-Subscribe: list of all subscribers of this client
-    std::vector<client_observer_t> m_subscibers;
+    std::vector<client_observer_t> m_subscribers;
     // Thread handler
     std::thread * m_receiveTask = nullptr;
 

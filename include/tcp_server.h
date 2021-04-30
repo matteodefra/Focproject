@@ -43,7 +43,7 @@ private:
     // Vector of all clients connected
     std::vector<Client> m_clients;
     // List of all server subscribers
-    std::vector<server_observer_t> m_subscibers;
+    std::vector<server_observer_t> m_subscribers;
 
     std::thread * threadHandle;
 

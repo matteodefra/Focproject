@@ -1,6 +1,8 @@
 
 #include "../include/tcp_client.h"
 
+// Connect the client to the server by passing the IP address of the server and the port
+// Returns a pipe_ret_t instance
 
 pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
     m_sockfd = 0;
@@ -13,7 +15,8 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
         return ret;
     }
 
-    int inetSuccess = inet_aton(address.c_str(), &m_server.sin_addr);
+    int inetSuccess = inet_aton(address.c_str(), &m_server.sin_addr); //returns non-zero if the address is a valid one, 
+                                                                      //and it returns zero if the address is invalid.
 
     if(!inetSuccess) { // inet_addr failed to parse address
         // if hostname is not in IP strings and dots format, try resolve it
@@ -27,15 +30,18 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
         addrList = (struct in_addr **) host->h_addr_list;
         m_server.sin_addr = *addrList[0];
     }
+
     m_server.sin_family = AF_INET;
     m_server.sin_port = htons( port );
 
     int connectRet = connect(m_sockfd , (struct sockaddr *)&m_server , sizeof(m_server));
-    if (connectRet == -1) {
+
+    if (connectRet == -1) { //connect failed
         ret.success = false;
         ret.msg = strerror(errno);
         return ret;
     }
+
     m_receiveTask = new std::thread(&TcpClient::ReceiveTask, this);
     ret.success = true;
     return ret;

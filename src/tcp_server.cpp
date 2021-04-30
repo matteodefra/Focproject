@@ -3,11 +3,11 @@
 
 
 void TcpServer::subscribe(const server_observer_t & observer) {
-    m_subscibers.push_back(observer);
+    m_subscribers.push_back(observer);
 }
 
 void TcpServer::unsubscribeAll() {
-    m_subscibers.clear();
+    m_subscribers.clear();
 }
 
 void TcpServer::printClients() {
@@ -90,10 +90,10 @@ bool TcpServer::deleteClient(Client & client) {
  * the specific observer requested IP
  */
 void TcpServer::publishClientMsg(const Client & client, const char * msg, size_t msgSize) {
-    for (uint i=0; i<m_subscibers.size(); i++) {
-        if (m_subscibers[i].wantedIp == client.getIp() || m_subscibers[i].wantedIp.empty()) {
-            if (m_subscibers[i].incoming_packet_func != NULL) {
-                (*m_subscibers[i].incoming_packet_func)(client, msg, msgSize);
+    for (uint i=0; i<m_subscribers.size(); i++) {
+        if (m_subscribers[i].wantedIp == client.getIp() || m_subscribers[i].wantedIp.empty()) {
+            if (m_subscribers[i].incoming_packet_func != NULL) {
+                (*m_subscribers[i].incoming_packet_func)(client, msg, msgSize);
             }
         }
     }
@@ -106,10 +106,10 @@ void TcpServer::publishClientMsg(const Client & client, const char * msg, size_t
  * observer requested IP
  */
 void TcpServer::publishClientDisconnected(const Client & client) {
-    for (uint i=0; i<m_subscibers.size(); i++) {
-        if (m_subscibers[i].wantedIp == client.getIp()) {
-            if (m_subscibers[i].disconnected_func != NULL) {
-                (*m_subscibers[i].disconnected_func)(client);
+    for (uint i=0; i<m_subscribers.size(); i++) {
+        if (m_subscribers[i].wantedIp == client.getIp()) {
+            if (m_subscribers[i].disconnected_func != NULL) {
+                (*m_subscribers[i].disconnected_func)(client);
             }
         }
     }
@@ -122,7 +122,7 @@ void TcpServer::publishClientDisconnected(const Client & client) {
 pipe_ret_t TcpServer::start(int port) {
     m_sockfd = 0;
     m_clients.reserve(10);
-    m_subscibers.reserve(10);
+    m_subscribers.reserve(10);
     pipe_ret_t ret;
 
     m_sockfd = socket(AF_INET,SOCK_STREAM,0);

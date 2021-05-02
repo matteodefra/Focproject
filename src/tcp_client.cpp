@@ -1,5 +1,7 @@
 
 #include "../include/tcp_client.h"
+#include "../include/util.h"
+
 
 // Connect the client to the server by passing the IP address of the server and the port
 // Returns a pipe_ret_t instance
@@ -47,6 +49,15 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
     return ret;
 }
 
+
+/**
+ * Encrypt the message with AES-128 bit in CBC mode.
+ * Return a struct containing message and length 
+ */
+// encdecMsg encrypt() {
+//     return;
+// }
+
 /**
  * This function will need to implement secure symmetric communication 
  * through the symmetric key negotiated in the first part
@@ -54,6 +65,12 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
 pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
     pipe_ret_t ret;
     // We must create here before the secure message
+    // Read .pem key and create secure msg
+    // AES-128 CBC bit
+    // encdecMsg encrypt();
+
+
+    // Change name accordingly
     int numBytesSent = send(m_sockfd, msg, size, 0);
     if (numBytesSent < 0 ) { // send failed
         ret.success = false;
@@ -115,8 +132,8 @@ void TcpClient::publishServerDisconnected(const pipe_ret_t & ret) {
  * server will negotiate a session key to use for their communication
  */
 void TcpClient::authenticateThroughServer() {
-    // Send public key, authentication
-    // Then symmetric session key negotiation
+    // Send public key, authentication using certificates
+    // Then symmetric session key negotiation via elliptic curve diffie hellman
     return;
 }
 
@@ -129,6 +146,10 @@ void TcpClient::displayAllClients() {
 }
 
 
+// encdecMsg decrypt() {
+
+// }
+
 /*
  * Receive server packets, and notify user
  */
@@ -140,6 +161,9 @@ void TcpClient::ReceiveTask() {
     while(!stop) {
         char msg[MAX_PACKET_SIZE];
         int numOfBytesReceived = recv(m_sockfd, msg, MAX_PACKET_SIZE, 0);
+        // Decrypt arrived message
+        // encdecMsg = decrypt();
+
         if(numOfBytesReceived < 1) {
             pipe_ret_t ret;
             ret.success = false;

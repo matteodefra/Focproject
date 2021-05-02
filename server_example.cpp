@@ -2,7 +2,7 @@
 /////////////////////SERVER EXAMPLE////////////////////////
 ///////////////////////////////////////////////////////////
 
-#ifdef SERVER_EXAMPLE
+// #ifdef SERVER_EXAMPLE
 
 #include <iostream>
 #include <signal.h>
@@ -25,6 +25,8 @@ void onIncomingMsg1(const Client & client, const char * msg, size_t size) {
     // if client sent the string "quit", close server
     // else if client sent "print" print the server clients
     // else just print the client message
+
+    // Discretization message
     if (msgStr.find("quit") != std::string::npos) {
         std::cout << "Closing server..." << std::endl;
         pipe_ret_t finishRet = server.finish();
@@ -35,9 +37,24 @@ void onIncomingMsg1(const Client & client, const char * msg, size_t size) {
         }
     } else if (msgStr.find("print") != std::string::npos){
         server.printClients();
-    } else {
-        std::string replyMsg = "server got this msg: "+ msgStr;
-        server.sendToAllClients(replyMsg.c_str(), replyMsg.length());
+    } else if (msgStr.find("requestToTalk") != std::string::npos) {
+        // Server communicate the other client to check acceptance
+        // Separate string and take only the required part
+        // server.communicateRequest(client,msg,size);
+    }
+    else if (msgStr.find("showList") != std::string::npos) {
+        // Server send list to the client that requested it
+        // server.sendList(client, msg, size);
+    }
+    // else if (msgStr.find("logOff") != std::string::npos) {
+
+    // }
+    else {
+        // Forward the message to the other client
+        // server.forwardMessage();
+
+        // std::string replyMsg = "server got this msg: "+ msgStr;
+        // server.sendToAllClients(replyMsg.c_str(), replyMsg.length());
     }
 }
 
@@ -96,4 +113,4 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-#endif
+// #endif

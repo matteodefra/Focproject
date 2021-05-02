@@ -2,11 +2,13 @@
 /////////////////////CLIENT EXAMPLE////////////////////////
 ///////////////////////////////////////////////////////////
 
-#ifdef CLIENT_EXAMPLE
+// #ifdef CLIENT_EXAMPLE
 
 #include <iostream>
 #include <signal.h>
 #include "include/tcp_client.h"
+
+using namespace std;
 
 TcpClient client;
 
@@ -64,7 +66,8 @@ int main() {
 	// send messages to server
 	while(1)
 	{
-		std::string msg = "hello server\n";
+		string msg;
+		cin >> msg;   //"hello server\n";
         pipe_ret_t sendRet = client.sendMsg(msg.c_str(), msg.size());
 		if (!sendRet.success) {
 			std::cout << "Failed to send msg: " << sendRet.msg << std::endl;
@@ -76,4 +79,4 @@ int main() {
 	return 0;
 }
 
-#endif
+// #endif

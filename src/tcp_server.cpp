@@ -1,5 +1,6 @@
 
 #include "../include/tcp_server.h"
+#include "../include/util.h"
 
 
 void TcpServer::subscribe(const server_observer_t & observer) {
@@ -28,8 +29,15 @@ void TcpServer::printClients() {
  * authority in order to prove its affidability. Then symmetric key is negotiated
  */
 void authenticateServer() {
+    // send certificate
+    // negotiate elliptic curve diffie hellman key
     return;
 }
+
+
+// encdecMsg decrypt() {
+    // return;
+// }
 
 
 /*
@@ -41,9 +49,15 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
     authenticateServer();
 
+    // Public key?
+
     while(client->isConnected()) {
         char msg[MAX_PACKET_SIZE];
         int numOfBytesReceived = recv(client->getFileDescriptor(), msg, MAX_PACKET_SIZE, 0);
+
+        // Decrypt received message with AES-128 bit CBC
+        // encdecMsg = decrypt();
+
         if(numOfBytesReceived < 1) {
             client->setDisconnected();
             if (numOfBytesReceived == 0) { //client closed connection
@@ -194,6 +208,8 @@ Client TcpServer::acceptClient(uint timeout) {
         return newClient;
     }
 
+    // Public key?
+
     newClient.setFileDescriptor(file_descriptor);
     newClient.setConnected();
     newClient.setIp(inet_ntoa(m_clientAddress.sin_addr));
@@ -219,12 +235,24 @@ pipe_ret_t TcpServer::sendToAllClients(const char * msg, size_t size) {
     return ret;
 }
 
+
+// encdecMsg encrypt() {
+    
+// }
+
+
+
 /*
  * Send message to specific client (determined by client IP address).
  * Return true if message was sent successfully
  */
 pipe_ret_t TcpServer::sendToClient(const Client & client, const char * msg, size_t size){
     pipe_ret_t ret;
+
+    // Encrypt message with AES128 bit- CBC mode
+    // TODO
+    // encdecMsg = encrypt()
+
     int numBytesSent = send(client.getFileDescriptor(), (char *)msg, size, 0);
     if (numBytesSent < 0) { // send failed
         ret.success = false;
@@ -241,6 +269,19 @@ pipe_ret_t TcpServer::sendToClient(const Client & client, const char * msg, size
     ret.success = true;
     return ret;
 }
+
+/**
+ * Send the request to talk to the other party
+ */
+// pipe_ret_t TcpServer::communicateRequest(const Client & client, const char * msg, size_t size){
+//     Get Client object instance from username
+//     Client c = getClient(std::string username);
+//     return;
+// }
+/**
+ * Use digital envelope
+ */ 
+
 
 /*
  * Close server and clients resources.

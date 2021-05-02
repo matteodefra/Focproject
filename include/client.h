@@ -15,12 +15,25 @@ private:
     int m_sockfd = 0;
     std::string m_ip = "";
     std::string m_errorMsg = "";
+    std::string m_name = "";
+
+    // Istance of the chatting client (to allow forwarding)
+    std::string ipChattingClient;
+    std::string usernameChattingClient;
+
+    // Public key instance of client (stored a priori)
+
+    // Shared symmetric key AES128 bit to use for symmetric communication
+
 
     // Monitor online status of client
     bool m_isConnected;
 
     // Needed to monitor the status of the chat
     bool m_isChatting;
+
+    // Authentication flag
+    bool m_isAuthenticated;
 
     // Handler thread for the client thread 
     std::thread * m_threadHandler = nullptr;
@@ -36,6 +49,8 @@ public:
 
     void setIp(const std::string & ip) { m_ip = ip; }
     std::string getIp() const { return m_ip; }
+
+    void recoverPublicKey();
 
     void setErrorMessage(const std::string & msg) { m_errorMsg = msg; }
     std::string getInfoMessage() const { return m_errorMsg; }

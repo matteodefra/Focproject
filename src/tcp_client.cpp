@@ -4,11 +4,8 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
-=======
-#include <openssl/evp.h>
-#include <openssl/pem.h>
-#include <openssl/rand.h>
 
+using namespace std;
 
 // Connect the client to the server by passing the IP address of the server and the port
 // Returns a pipe_ret_t instance
@@ -70,22 +67,28 @@ encdecMsg encrypt(const char * msg, size_t size) {
     for(int i = 0; i < size; i++){
         clear_buf[i] = static_cast<unsigned char>(msg[i]);
     }
+    cout << clear_buf << endl;
 
     const EVP_CIPHER* cipher = EVP_aes_128_cbc();
 	int iv_len = EVP_CIPHER_iv_length(cipher);
 	int block_size = EVP_CIPHER_block_size(cipher);
 
     unsigned char *key = (unsigned char *)"0123456789012345"; //change with the shared key
-	unsigned char *iv = (unsigned char *)malloc(iv_len);
 
-    RAND_poll(); //seed generation
+    unsigned char *iv = (unsigned char *)"pippo";
+    
+	// unsigned char *iv = (unsigned char *)malloc(iv_len);
 
-    int rand_ret = RAND_bytes((unsigned char*)&iv[0], iv_len);
+    // RAND_poll(); //seed generation
 
-    if(rand_ret != 1) { //rand in the error
-		std::cerr << "Error: RAND";
-		exit(-1);
-	}
+    // int rand_ret = RAND_bytes((unsigned char*)&iv[0], iv_len);
+
+    // if(rand_ret != 1) { //rand in the error
+	// 	std::cerr << "Error: RAND";
+	// 	exit(-1);
+	// }
+
+    cout << iv << endl;
 
     if(size > INT_MAX - block_size) { //int overflow
 		std::cerr << "Error: int overflow";
@@ -136,6 +139,7 @@ encdecMsg encrypt(const char * msg, size_t size) {
         }
     }
 
+
     int encryptFinal_ret = EVP_EncryptFinal(ctx, cipher_buf + total_len, &update_len);
 	
     if(encryptFinal_ret != 1) {
@@ -146,16 +150,19 @@ encdecMsg encrypt(const char * msg, size_t size) {
 	total_len += update_len;
 	size_t cipher_size = total_len;
 
+    BIO_dump_fp(stdout,(const char *)cipher_buf,total_len);
+    cout << endl;
+
     EVP_CIPHER_CTX_free(ctx);
     free(clear_buf);
 
     ret.msg = (char*)cipher_buf;
-    ret.msg_size = size;
+    ret.msg_size = cipher_size;
     ret.iv = (char*)iv;
     ret.iv_size = iv_len;
 
     free(cipher_buf);
-    free(iv);
+    // free(iv);
 
     return ret;
 }
@@ -166,15 +173,15 @@ encdecMsg encrypt(const char * msg, size_t size) {
  */
 pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) { //clear 
     pipe_ret_t ret;
+    std::cout << msg;
     encdecMsg new_encdecMsg;
     // We must create here before the secure message
     // Read .pem key and create secure msg
     // AES-128 CBC bit
     new_encdecMsg = encrypt(msg,size);
 
-
     // Change name accordingly
-    int numBytesSent = send(m_sockfd, msg, size, 0);
+    int numBytesSent = send(m_sockfd, new_encdecMsg.msg.c_str(), new_encdecMsg.msg_size, 0);
     if (numBytesSent < 0 ) { // send failed
         ret.success = false;
         ret.msg = strerror(errno);
@@ -315,7 +322,7 @@ encdecMsg decrypt(unsigned char* encMsg, int encMsgLen) {
     encdecMsg decodedMsg;
     std::string decodedString( reinterpret_cast<char const*>(cphr_buf), cphr_size ) ;
     decodedMsg.msg = decodedString;
-    decodedMsg.size = cphr_size;
+    decodedMsg.msg_size = cphr_size;
 
     free(cphr_buf);
     free(iv); //?
@@ -352,7 +359,7 @@ void TcpClient::ReceiveTask() {
             encdecMsg receivedMsg = decrypt((unsigned char*)msg, numOfBytesReceived);
 
             // Based on message received, we need to perform some action
-            publishServerMsg(receivedMsg.msg.c_str(), receivedMsg.size);
+            publishServerMsg(receivedMsg.msg.c_str(), receivedMsg.msg_size);
         }
     }
 }

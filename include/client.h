@@ -27,7 +27,7 @@ private:
      *  Here client will also contain the shared symmetric key negotiated 
      *  in the beginning
      */
-    EVP_PKEY* serverClientSymmetricKey;
+    // EVP_PKEY* serverClientSymmetricKey;
 
 
     // Monitor online status of client
@@ -75,7 +75,7 @@ public:
 
     // Methods to set and get shared secret between server and client
     void setServerClientSharedKey();
-    EVP_PKEY* getServerClientSharedSecret() {return serverClientSymmetricKey;}
+    // EVP_PKEY* getServerClientSharedSecret() {return serverClientSymmetricKey;}
 
 
     void setThreadHandler(std::function<void(void)> func) { m_threadHandler = new std::thread(func);}

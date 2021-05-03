@@ -4,6 +4,8 @@
 #include <openssl/pem.h>
 #include <openssl/rand.h>
 
+using namespace std;
+
 void TcpServer::subscribe(const server_observer_t & observer) {
     m_subscribers.push_back(observer);
 }
@@ -46,8 +48,16 @@ void authenticateServer() {
  * and the length of the decrypted message.
  * If some error occurs, the message is discarded
  */
-encdecMsg decrypt(unsigned char* encMsg, int encMsgLen) {
+encdecMsg decrypt(unsigned char* encMsg, size_t encMsgLen) {
     int ret;
+
+    unsigned char* cipher_buf = (unsigned char*)malloc(encMsgLen); 
+    for(int i = 0; i < encMsgLen; i++){
+        cipher_buf[i] = static_cast<unsigned char>(encMsg[i]);
+    }
+    
+
+    BIO_dump_fp(stdout,(const char *)encMsg,encMsgLen);
 
     // Setup of the encryption part
     const EVP_CIPHER* cipher = EVP_aes_128_cbc();
@@ -60,42 +70,59 @@ encdecMsg decrypt(unsigned char* encMsg, int encMsgLen) {
      */
     unsigned char *key = (unsigned char *)"0123456789012345";
 
-    // EVP_PKEY* sharedSecret = getServerClientSharedSecret();
-    unsigned char* iv = (unsigned char*)malloc(iv_len);
-    RAND_poll();
-    ret = RAND_bytes((unsigned char*)&iv[0],iv_len);
-    if (ret != 1) {
+    
+    unsigned char *iv = (unsigned char *)"pippo";
+    // // EVP_PKEY* sharedSecret = getServerClientSharedSecret();
+    // unsigned char* iv = (unsigned char*)malloc(iv_len);
+    // RAND_poll();
+    // ret = RAND_bytes((unsigned char*)&iv[0],iv_len);
+    // if (ret != 1) {
+    //     DECRYPT_ERROR;
+    // }
+
+    if (encMsgLen - iv_len > INT_MAX - block_size) {
+        cout << "qui1" << endl;
         DECRYPT_ERROR;
     }
 
-    if (encMsgLen > INT_MAX - block_size) {
-        DECRYPT_ERROR;
-    }
-
-    int dec_buffer_size = encMsgLen + block_size;
-    unsigned char *cphr_buf = (unsigned char *)malloc(dec_buffer_size);
+    size_t dec_buffer_size = encMsgLen + block_size - iv_len;
+    unsigned char *plain_buf = (unsigned char *)malloc(dec_buffer_size);
 
     EVP_CIPHER_CTX *dec_ctx;
     dec_ctx = EVP_CIPHER_CTX_new();
     if (!dec_ctx) {
+        cout << "qui2" << endl;
         DECRYPT_ERROR;
     }
     // ret = EVP_DecryptInit(dec_ctx,cipher,sharedSecret,iv);
     ret = EVP_DecryptInit(dec_ctx,cipher,key,iv);
     if (ret != 1) {
+        cout << "qui3" << endl;
         DECRYPT_ERROR;
     }
 
     int update_len = 0;
     int total_len = 0;
 
-    while ((EVP_DecryptUpdate(dec_ctx,cphr_buf,&update_len,encMsg,encMsgLen)) != 1) {
-        DECRYPT_ERROR;
-    }
-    total_len += update_len;
+     while(1){
+        int decryptUpdate_ret = EVP_DecryptUpdate(dec_ctx, plain_buf, &update_len, cipher_buf, encMsgLen);
 
-    ret = EVP_DecryptFinal(dec_ctx,cphr_buf + total_len,&update_len);
+        if(decryptUpdate_ret != 1) {
+	    	std::cerr << "Error: EncryptUpdate";
+	    	exit(-1);
+	    }
+
+        total_len += update_len;
+        if( encMsgLen - total_len < block_size ){
+         break;
+        }
+    }
+
+    BIO_dump_fp(stdout,(const char *)plain_buf,total_len);
+
+    ret = EVP_DecryptFinal(dec_ctx,plain_buf + total_len,&update_len);
     if (ret != 1) {
+        cout << "qui4" << endl;
         DECRYPT_ERROR;
     }
     total_len += update_len;
@@ -105,12 +132,13 @@ encdecMsg decrypt(unsigned char* encMsg, int encMsgLen) {
     EVP_CIPHER_CTX_free(dec_ctx);
     
     encdecMsg decodedMsg;
-    std::string decodedString( reinterpret_cast<char const*>(cphr_buf), cphr_size ) ;
-    decodedMsg.msg = decodedString;
-    decodedMsg.size = cphr_size;
+    decodedMsg.msg = (char*)plain_buf;
+    decodedMsg.msg_size = cphr_size;
 
-    free(cphr_buf);
-    free(iv); //?
+    cout << decodedMsg.msg << endl;
+
+    free(plain_buf);
+    // free(iv); //?
 
     return decodedMsg;
 }   
@@ -122,7 +150,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
     Client * client = &m_clients.back();
 
-    authenticateServer();
+    // authenticateServer();
 
     // Public key?
 
@@ -143,11 +171,15 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             deleteClient(*client);
             break;
         } else {
+
+            BIO_dump_fp(stdout,(const char *)msg,numOfBytesReceived);
+
+
             // Decrypt received message with AES-128 bit CBC
             encdecMsg decryptedMessage = decrypt((unsigned char*)msg,numOfBytesReceived);
 
             // Discretize based on the received message
-            publishClientMsg(*client, decryptedMessage.msg.c_str(), decryptedMessage.size);
+            publishClientMsg(*client, decryptedMessage.msg.c_str(), decryptedMessage.msg_size);
         }
     }
 }
@@ -400,7 +432,7 @@ encdecMsg encrypt(const char * msg, size_t size) {
     free(clear_buf);
 
     ret.msg = (char*)cipher_buf;
-    ret.msg_size = size;
+    ret.msg_size = cipher_size;
     ret.iv = (char*)iv;
     ret.iv_size = iv_len;
 

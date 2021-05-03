@@ -12,3 +12,11 @@ struct encdecMsg {
         iv_size = 0;
     }
 };
+
+// Create a predefined error message that some problem occured in 
+// decrypting message 
+#define DECRYPT_ERROR \
+    encdecMsg error; \
+    error.msg = "error"; \
+    error.size = 6; \
+    return error; 

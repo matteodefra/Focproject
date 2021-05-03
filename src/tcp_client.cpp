@@ -1,6 +1,10 @@
-
 #include "../include/tcp_client.h"
 #include "../include/util.h"
+#include "../include/client.h"
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/rand.h>
+=======
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
@@ -244,10 +248,80 @@ void TcpClient::displayAllClients() {
     return;
 }
 
+/**
+ * Util function to decrypt server message
+ * 
+ * @param encMsg encoded message arrived from server
+ * @param encMsgLen length of the encoded message
+ * 
+ * Decrypt the encMsg and return a struct, containing the decrypted message
+ * and the length of the decrypted message.
+ * If some error occurs, the message is discarded
+ */
+encdecMsg decrypt(unsigned char* encMsg, int encMsgLen) {
+    int ret;
 
-// encdecMsg decrypt() {
+    // Setup of the encryption part
+    const EVP_CIPHER* cipher = EVP_aes_128_cbc();
+    int iv_len = EVP_CIPHER_iv_length(cipher);
+    int block_size = EVP_CIPHER_block_size(cipher);
 
-// }
+    /**
+     * Recover the symmetric key between client and server. At this time, the corresponding 
+     * shared secret is already inside client memory and server too
+     */
+    unsigned char *key = (unsigned char *)"0123456789012345";
+
+    // EVP_PKEY* sharedSecret = getServerClientSharedSecret();
+    unsigned char* iv = (unsigned char*)malloc(iv_len);
+    RAND_poll();
+    ret = RAND_bytes((unsigned char*)&iv[0],iv_len);
+    if (ret != 1) {
+        DECRYPT_ERROR;
+    }
+
+    int dec_buffer_size = encMsgLen + block_size;
+    unsigned char *cphr_buf = (unsigned char *)malloc(dec_buffer_size);
+
+    EVP_CIPHER_CTX *dec_ctx;
+    dec_ctx = EVP_CIPHER_CTX_new();
+    if (!dec_ctx) {
+        DECRYPT_ERROR;
+    }
+    // ret = EVP_DecryptInit(dec_ctx,cipher,sharedSecret,iv);
+    ret = EVP_DecryptInit(dec_ctx,cipher,key,iv);
+    if (ret != 1) {
+        DECRYPT_ERROR;
+    }
+
+    int update_len = 0;
+    int total_len = 0;
+
+    while ((EVP_DecryptUpdate(dec_ctx,cphr_buf,&update_len,encMsg,encMsgLen)) != 1) {
+        DECRYPT_ERROR;
+    }
+    total_len += update_len;
+
+    ret = EVP_DecryptFinal(dec_ctx,cphr_buf + total_len,&update_len);
+    if (ret != 1) {
+        DECRYPT_ERROR;
+    }
+    total_len += update_len;
+    int cphr_size = total_len;
+
+    // Free decryption memory
+    EVP_CIPHER_CTX_free(dec_ctx);
+    
+    encdecMsg decodedMsg;
+    std::string decodedString( reinterpret_cast<char const*>(cphr_buf), cphr_size ) ;
+    decodedMsg.msg = decodedString;
+    decodedMsg.size = cphr_size;
+
+    free(cphr_buf);
+    free(iv); //?
+
+    return decodedMsg;
+}   
 
 /*
  * Receive server packets, and notify user
@@ -260,8 +334,6 @@ void TcpClient::ReceiveTask() {
     while(!stop) {
         char msg[MAX_PACKET_SIZE];
         int numOfBytesReceived = recv(m_sockfd, msg, MAX_PACKET_SIZE, 0);
-        // Decrypt arrived message
-        // encdecMsg = decrypt();
 
         if(numOfBytesReceived < 1) {
             pipe_ret_t ret;
@@ -276,8 +348,11 @@ void TcpClient::ReceiveTask() {
             finish();
             break;
         } else {
+            // Decrypt arrived message
+            encdecMsg receivedMsg = decrypt((unsigned char*)msg, numOfBytesReceived);
+
             // Based on message received, we need to perform some action
-            publishServerMsg(msg, numOfBytesReceived);
+            publishServerMsg(receivedMsg.msg.c_str(), receivedMsg.size);
         }
     }
 }

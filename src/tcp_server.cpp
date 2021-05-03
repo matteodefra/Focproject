@@ -311,9 +311,104 @@ pipe_ret_t TcpServer::sendToAllClients(const char * msg, size_t size) {
 }
 
 
-// encdecMsg encrypt() {
+encdecMsg encrypt(const char * msg, size_t size) {
+
+    encdecMsg ret;
+
+    //conversion from char to unsigned char
+    unsigned char* clear_buf = (unsigned char*)malloc(size); 
+    for(int i = 0; i < size; i++){
+        clear_buf[i] = static_cast<unsigned char>(msg[i]);
+    }
+
+    const EVP_CIPHER* cipher = EVP_aes_128_cbc();
+	int iv_len = EVP_CIPHER_iv_length(cipher);
+	int block_size = EVP_CIPHER_block_size(cipher);
+
+    unsigned char *key = (unsigned char *)"0123456789012345"; //change with the shared key
+	unsigned char *iv = (unsigned char *)malloc(iv_len);
+
+    RAND_poll(); //seed generation
+
+    int rand_ret = RAND_bytes((unsigned char*)&iv[0], iv_len);
+
+    if(rand_ret != 1) { //rand in the error
+		std::cerr << "Error: RAND";
+		exit(-1);
+	}
+
+    if(size > INT_MAX - block_size) { //int overflow
+		std::cerr << "Error: int overflow";
+		exit(-1);
+	}
+
+    size_t enc_buffer_size = size + block_size; //buffer size for ciphertxt
+
+    unsigned char* cipher_buf = (unsigned char*)malloc(enc_buffer_size);
     
-// }
+    if(!cipher_buf) {
+		std::cerr << "Error: malloc";
+		exit(-1);
+	}
+
+    //Contest creation
+
+    EVP_CIPHER_CTX *ctx;
+
+	ctx = EVP_CIPHER_CTX_new();
+
+	if(!ctx) { //error in the context declaration
+		std::cerr << "Error: ctx declaration";
+		exit(-1);
+	}
+
+	int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, iv);
+
+	if(encryptInit_ret != 1) {
+		std::cerr << "Error: EncryptInit";
+		exit(-1);
+	}
+
+	int update_len = 0;
+	int total_len = 0;
+
+    while(1){
+        int encyptUpdate_ret = EVP_EncryptUpdate(ctx, cipher_buf, &update_len, clear_buf, size);
+
+        if(encyptUpdate_ret != 1) {
+	    	std::cerr << "Error: EncryptUpdate";
+	    	exit(-1);
+	    }
+
+        total_len += update_len;
+        if( size - total_len < block_size ){
+         break;
+        }
+    }
+
+    int encryptFinal_ret = EVP_EncryptFinal(ctx, cipher_buf + total_len, &update_len);
+	
+    if(encryptFinal_ret != 1) {
+		std::cerr << "Error: EncryptFinal";
+		exit(-1);
+	}
+
+	total_len += update_len;
+	size_t cipher_size = total_len;
+
+    EVP_CIPHER_CTX_free(ctx);
+    free(clear_buf);
+
+    ret.msg = (char*)cipher_buf;
+    ret.msg_size = size;
+    ret.iv = (char*)iv;
+    ret.iv_size = iv_len;
+
+    free(cipher_buf);
+    free(iv);
+
+    return ret;
+}
 
 
 
@@ -323,12 +418,16 @@ pipe_ret_t TcpServer::sendToAllClients(const char * msg, size_t size) {
  */
 pipe_ret_t TcpServer::sendToClient(const Client & client, const char * msg, size_t size){
     pipe_ret_t ret;
+    encdecMsg new_encdecMsg;
 
     // Encrypt message with AES128 bit- CBC mode
     // TODO
-    // encdecMsg = encrypt()
+    new_encdecMsg = encrypt(msg,size);
 
-    int numBytesSent = send(client.getFileDescriptor(), (char *)msg, size, 0);
+    char * enc_msg = &new_encdecMsg.msg[0];
+
+
+    int numBytesSent = send(client.getFileDescriptor(), enc_msg, new_encdecMsg.msg_size, 0);
     if (numBytesSent < 0) { // send failed
         ret.success = false;
         ret.msg = strerror(errno);

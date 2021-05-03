@@ -4,6 +4,11 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
+=======
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/rand.h>
+
 
 // Connect the client to the server by passing the IP address of the server and the port
 // Returns a pipe_ret_t instance
@@ -56,20 +61,116 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
  * Encrypt the message with AES-128 bit in CBC mode.
  * Return a struct containing message and length 
  */
-// encdecMsg encrypt() {
-//     return;
-// }
+encdecMsg encrypt(const char * msg, size_t size) {
+
+    encdecMsg ret;
+
+    //conversion from char to unsigned char
+    unsigned char* clear_buf = (unsigned char*)malloc(size); 
+    for(int i = 0; i < size; i++){
+        clear_buf[i] = static_cast<unsigned char>(msg[i]);
+    }
+
+    const EVP_CIPHER* cipher = EVP_aes_128_cbc();
+	int iv_len = EVP_CIPHER_iv_length(cipher);
+	int block_size = EVP_CIPHER_block_size(cipher);
+
+    unsigned char *key = (unsigned char *)"0123456789012345"; //change with the shared key
+	unsigned char *iv = (unsigned char *)malloc(iv_len);
+
+    RAND_poll(); //seed generation
+
+    int rand_ret = RAND_bytes((unsigned char*)&iv[0], iv_len);
+
+    if(rand_ret != 1) { //rand in the error
+		std::cerr << "Error: RAND";
+		exit(-1);
+	}
+
+    if(size > INT_MAX - block_size) { //int overflow
+		std::cerr << "Error: int overflow";
+		exit(-1);
+	}
+
+    size_t enc_buffer_size = size + block_size; //buffer size for ciphertxt
+
+    unsigned char* cipher_buf = (unsigned char*)malloc(enc_buffer_size);
+    
+    if(!cipher_buf) {
+		std::cerr << "Error: malloc";
+		exit(-1);
+	}
+
+    //Contest creation
+
+    EVP_CIPHER_CTX *ctx;
+
+	ctx = EVP_CIPHER_CTX_new();
+
+	if(!ctx) { //error in the context declaration
+		std::cerr << "Error: ctx declaration";
+		exit(-1);
+	}
+
+	int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, iv);
+
+	if(encryptInit_ret != 1) {
+		std::cerr << "Error: EncryptInit";
+		exit(-1);
+	}
+
+	int update_len = 0;
+	int total_len = 0;
+
+    while(1){
+        int encyptUpdate_ret = EVP_EncryptUpdate(ctx, cipher_buf, &update_len, clear_buf, size);
+
+        if(encyptUpdate_ret != 1) {
+	    	std::cerr << "Error: EncryptUpdate";
+	    	exit(-1);
+	    }
+
+        total_len += update_len;
+        if( size - total_len < block_size ){
+         break;
+        }
+    }
+
+    int encryptFinal_ret = EVP_EncryptFinal(ctx, cipher_buf + total_len, &update_len);
+	
+    if(encryptFinal_ret != 1) {
+		std::cerr << "Error: EncryptFinal";
+		exit(-1);
+	}
+
+	total_len += update_len;
+	size_t cipher_size = total_len;
+
+    EVP_CIPHER_CTX_free(ctx);
+    free(clear_buf);
+
+    ret.msg = (char*)cipher_buf;
+    ret.msg_size = size;
+    ret.iv = (char*)iv;
+    ret.iv_size = iv_len;
+
+    free(cipher_buf);
+    free(iv);
+
+    return ret;
+}
 
 /**
  * This function will need to implement secure symmetric communication 
  * through the symmetric key negotiated in the first part
  */
-pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
+pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) { //clear 
     pipe_ret_t ret;
+    encdecMsg new_encdecMsg;
     // We must create here before the secure message
     // Read .pem key and create secure msg
     // AES-128 CBC bit
-    // encdecMsg encrypt();
+    new_encdecMsg = encrypt(msg,size);
 
 
     // Change name accordingly

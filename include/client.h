@@ -23,7 +23,11 @@ private:
 
     // Public key instance of client (stored a priori)
 
-    // Shared symmetric key AES128 bit to use for symmetric communication
+    /** Shared symmetric key AES128 bit to use for symmetric communication
+     *  Here client will also contain the shared symmetric key negotiated 
+     *  in the beginning
+     */
+    EVP_PKEY* serverClientSymmetricKey;
 
 
     // Monitor online status of client
@@ -63,6 +67,16 @@ public:
     void setChatting() { m_isChatting = true; }
     void setNotChatting() { m_isChatting = false; }
     bool isChatting() { return m_isChatting; }
+
+    // Will be managed by server, to reject or accept the "request to talk"
+    void setAuthenticated() { m_isAuthenticated = true; }
+    void setNotAuthenticated() { m_isAuthenticated = false; }
+    bool isAuthenticated() { return m_isAuthenticated; }
+
+    // Methods to set and get shared secret between server and client
+    void setServerClientSharedKey();
+    EVP_PKEY* getServerClientSharedSecret() {return serverClientSymmetricKey;}
+
 
     void setThreadHandler(std::function<void(void)> func) { m_threadHandler = new std::thread(func);}
 

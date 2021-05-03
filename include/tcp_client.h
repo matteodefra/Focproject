@@ -22,10 +22,10 @@
 #include <thread>
 #include "client_observer.h"
 #include "pipe_ret_t.h"
+#include <openssl/pem.h>
+
 
 #define MAX_PACKET_SIZE 4096
-
-
 
 
 //TODO: REMOVE ABOVE CODE, AND SHARE client.h FILE WITH SERVER AND CLIENT

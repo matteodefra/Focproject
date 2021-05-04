@@ -63,11 +63,6 @@ libserver.a: $(OBJECTSSERVER)
 libclient.a: $(OBJECTSCLIENT)
 	$(AR) $(ARFLAGS) $@ $^ $(LDLIBS)
 
-# tool: tool.o support.o
-#     g++ $(LDFLAGS) -o tool tool.o support.o $(LDLIBS)
 
-# tool.o: tool.cc support.hh
-#     g++ $(CPPFLAGS) -c tool.cc
-
-# support.o: support.hh support.cc
-#     g++ $(CPPFLAGS) -c support.cc
+clean:
+	rm -rf $(TARGETS) *.o *.a 

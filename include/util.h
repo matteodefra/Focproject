@@ -20,3 +20,5 @@ struct encdecMsg {
     error.msg = "error"; \
     error.msg_size = 6; \
     return error; 
+
+    

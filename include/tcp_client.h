@@ -23,6 +23,7 @@
 #include "client_observer.h"
 #include "pipe_ret_t.h"
 #include <openssl/pem.h>
+#include "util.h"
 
 
 #define MAX_PACKET_SIZE 4096
@@ -66,6 +67,8 @@ public:
      */
     pipe_ret_t connectTo(const std::string & address, int port);
     pipe_ret_t sendMsg(const char * msg, size_t size);
+
+    encdecMsg encrypt(const char * msg, size_t size);
 
     // Function must be called at client start in order to authenticate 
     void authenticateThroughServer();

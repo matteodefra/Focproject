@@ -67,7 +67,7 @@ int main() {
 	while(1)
 	{
 		string msg;
-		cin >> msg;   //"hello server\n";
+		getline(cin,msg);   //"hello server\n";
         pipe_ret_t sendRet = client.sendMsg(msg.c_str(), msg.size());
 		if (!sendRet.success) {
 			std::cout << "Failed to send msg: " << sendRet.msg << std::endl;

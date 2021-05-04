@@ -49,12 +49,19 @@ void authenticateServer() {
  * and the length of the decrypted message.
  * If some error occurs, the message is discarded
  */
-encdecMsg decrypt(unsigned char* encMsg, size_t encMsgLen) {
+encdecMsg decrypt(const char* encMsg, size_t encMsgLen) {
     int ret;
 
     cout << encMsgLen << endl;
 
-    BIO_dump_fp(stdout,(const char *)encMsg,encMsgLen);
+    BIO_dump_fp(stdout,encMsg,encMsgLen);
+
+    //conversion from char to unsigned char
+    unsigned char* cipher_buf = (unsigned char*)malloc(encMsgLen); 
+    for(int i = 0; i < encMsgLen; i++){
+        cipher_buf[i] = static_cast<unsigned char>(encMsg[i]);
+    }
+ 
 
     // Setup of the encryption part
     const EVP_CIPHER* cipher = EVP_aes_128_cbc();
@@ -70,18 +77,21 @@ encdecMsg decrypt(unsigned char* encMsg, size_t encMsgLen) {
     
     // EVP_PKEY* sharedSecret = getServerClientSharedSecret();
     unsigned char* iv = (unsigned char*)malloc(iv_len);
-    RAND_poll();
-    ret = RAND_bytes((unsigned char*)&iv[0],iv_len);
-    if (ret != 1) {
-        DECRYPT_ERROR;
-    }
+    
+    /**
+     * The iv message is contained inside the first part of the message sent in clear
+     */
+    // char *pointer = strtok((char*)cipher_buf," ");
+    // strcpy((char*)iv,pointer);
 
-    if (encMsgLen > INT_MAX - block_size) {
-        cout << "qui1" << endl;
-        DECRYPT_ERROR;
-    }
+    // pointer = strtok(NULL," ");   
 
-    size_t dec_buffer_size = encMsgLen + block_size;
+    // if (encMsgLen > INT_MAX - block_size) {
+    //     cout << "qui1" << endl;
+    //     DECRYPT_ERROR;
+    // }
+
+    size_t dec_buffer_size = encMsgLen + block_size + 1;
     unsigned char *plain_buf = (unsigned char *)malloc(dec_buffer_size);
 
     EVP_CIPHER_CTX *dec_ctx;
@@ -101,7 +111,7 @@ encdecMsg decrypt(unsigned char* encMsg, size_t encMsgLen) {
     int total_len = 0;
 
     // while(1){
-        int decryptUpdate_ret = EVP_DecryptUpdate(dec_ctx, (unsigned char *)plain_buf + total_len, &update_len, (unsigned char *)encMsg + total_len, encMsgLen);
+       int decryptUpdate_ret = EVP_DecryptUpdate(dec_ctx, plain_buf, &update_len, (unsigned char *)cipher_buf, encMsgLen);
 
         if(decryptUpdate_ret != 1) {
 	    	std::cerr << "Error: EncryptUpdate";
@@ -115,7 +125,7 @@ encdecMsg decrypt(unsigned char* encMsg, size_t encMsgLen) {
     //     }
     // }
 
-    ret = EVP_DecryptFinal(dec_ctx,(unsigned char *)plain_buf + total_len,&update_len);
+    ret = EVP_DecryptFinal(dec_ctx,plain_buf + total_len,&update_len);
     ERR_print_errors_fp(stderr);
     cout << ret << endl;
     if (ret != 1) {
@@ -173,7 +183,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
 
             // Decrypt received message with AES-128 bit CBC
-            encdecMsg decryptedMessage = decrypt((unsigned char*)msg,numOfBytesReceived);
+            encdecMsg decryptedMessage = decrypt(msg,numOfBytesReceived);
 
             // Discretize based on the received message
             publishClientMsg(*client, decryptedMessage.msg.c_str(), decryptedMessage.msg_size);
@@ -340,102 +350,122 @@ pipe_ret_t TcpServer::sendToAllClients(const char * msg, size_t size) {
 }
 
 
+
 encdecMsg encrypt(const char * msg, size_t size) {
-
+ 
     encdecMsg ret;
-
+ 
     //conversion from char to unsigned char
     unsigned char* clear_buf = (unsigned char*)malloc(size); 
     for(int i = 0; i < size; i++){
         clear_buf[i] = static_cast<unsigned char>(msg[i]);
     }
-
+ 
+    cout << endl;
+    cout << "Messaggio da criptare: ";
+    // cout << clear_buf << endl;
+ 
+ 
     const EVP_CIPHER* cipher = EVP_aes_128_cbc();
-	int iv_len = EVP_CIPHER_iv_length(cipher);
-	int block_size = EVP_CIPHER_block_size(cipher);
-
+    int iv_len = EVP_CIPHER_iv_length(cipher);
+    int block_size = EVP_CIPHER_block_size(cipher);
+ 
     unsigned char *key = (unsigned char *)"0123456789012345"; //change with the shared key
-	unsigned char *iv = (unsigned char *)malloc(iv_len);
-
+ 
+    unsigned char *iv = (unsigned char *)malloc(iv_len);
+ 
     RAND_poll(); //seed generation
-
+ 
     int rand_ret = RAND_bytes((unsigned char*)&iv[0], iv_len);
-
+ 
     if(rand_ret != 1) { //rand in the error
-		std::cerr << "Error: RAND";
-		exit(-1);
-	}
-
+        std::cerr << "Error: RAND";
+        exit(-1);
+    }
+ 
+    cout<<"IV: ";
+    cout << iv << endl;
+ 
     if(size > INT_MAX - block_size) { //int overflow
-		std::cerr << "Error: int overflow";
-		exit(-1);
-	}
-
+        std::cerr << "Error: int overflow";
+        exit(-1);
+    }
+ 
     size_t enc_buffer_size = size + block_size; //buffer size for ciphertxt
-
+ 
     unsigned char* cipher_buf = (unsigned char*)malloc(enc_buffer_size);
     
     if(!cipher_buf) {
-		std::cerr << "Error: malloc";
-		exit(-1);
-	}
-
+        std::cerr << "Error: malloc";
+        exit(-1);
+    }
+ 
     //Contest creation
-
+ 
     EVP_CIPHER_CTX *ctx;
-
-	ctx = EVP_CIPHER_CTX_new();
-
-	if(!ctx) { //error in the context declaration
-		std::cerr << "Error: ctx declaration";
-		exit(-1);
-	}
-
-	int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, iv);
-
-	if(encryptInit_ret != 1) {
-		std::cerr << "Error: EncryptInit";
-		exit(-1);
-	}
-
-	int update_len = 0;
-	int total_len = 0;
-
+ 
+    ctx = EVP_CIPHER_CTX_new();
+ 
+    if(!ctx) { //error in the context declaration
+        std::cerr << "Error: ctx declaration";
+        exit(-1);
+    }
+ 
+    // int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, iv);
+    int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, NULL);
+ 
+    if(encryptInit_ret != 1) {
+        std::cerr << "Error: EncryptInit";
+        exit(-1);
+    }
+ 
+    int update_len = 0;
+    int total_len = 0;
+ 
     // while(1){
-        int encyptUpdate_ret = EVP_EncryptUpdate(ctx, (unsigned char *)cipher_buf + total_len, &update_len, (unsigned char *)clear_buf + total_len, size);
-
-        if(encyptUpdate_ret != 1) {
-	    	std::cerr << "Error: EncryptUpdate";
-	    	exit(-1);
-	    }
-
+    int encyptUpdate_ret = EVP_EncryptUpdate(ctx, cipher_buf, &update_len, clear_buf , size);
+ 
+    //     if(encyptUpdate_ret != 1) {
+    //      std::cerr << "Error: EncryptUpdate";
+    //      exit(-1);
+    //     }
+ 
     //     total_len += update_len;
     //     if( size - total_len < block_size ){
     //      break;
     //     }
     // }
-
+ 
+ 
     int encryptFinal_ret = EVP_EncryptFinal(ctx, (unsigned char *)cipher_buf + total_len, &update_len);
-	
+    
     if(encryptFinal_ret != 1) {
-		std::cerr << "Error: EncryptFinal";
-		exit(-1);
-	}
-
-	total_len += update_len;
-	size_t cipher_size = total_len;
-
+        std::cerr << "Error: EncryptFinal";
+        exit(-1);
+    }
+ 
+    total_len += update_len;
+    size_t cipher_size = total_len;
+ 
+    cout<<"Messaggio criptato: ";
+    BIO_dump_fp(stdout,(const char *)cipher_buf,total_len);
+    cout << endl;
+ 
     EVP_CIPHER_CTX_free(ctx);
-    free(clear_buf);
-
+    // free(clear_buf);
+ 
+    string cipher_str = (char*)cipher_buf;
+    BIO_dump_fp(stdout,(char*)cipher_buf,total_len);
+ 
     ret.msg = (char*)cipher_buf;
     ret.msg_size = cipher_size;
     ret.iv = (char*)iv;
     ret.iv_size = iv_len;
-
+    
+ 
     free(cipher_buf);
     free(iv);
-
+ 
     return ret;
 }
 

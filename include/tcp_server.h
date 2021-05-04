@@ -21,6 +21,7 @@
 #include "client.h"
 #include "server_observer.h"
 #include "pipe_ret_t.h"
+#include "util.h"
 
 
 #define MAX_PACKET_SIZE 4096
@@ -34,6 +35,8 @@ private:
     struct sockaddr_in m_serverAddress;
     struct sockaddr_in m_clientAddress;
     fd_set m_fds;
+
+    bool ackReceived = false;
 
     /** Server will keep here a list of public key of all clients
      * (stored in files .pem) and also a list of the symmetric key 
@@ -68,6 +71,12 @@ public:
 
     // Delete a client from list (due to disconnection or logout)
     bool deleteClient(Client & client);
+
+    //
+    encdecMsg encrypt(const char * msg, size_t size);
+
+    //
+    bool ivSend(const unsigned char* iv, size_t iv_len);
 
     // Add or remove eventually new observers
     void subscribe(const server_observer_t & observer);

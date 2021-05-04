@@ -59,8 +59,8 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
  * Return a struct containing message and length 
  */
 encdecMsg TcpClient::encrypt(const char * msg, size_t size) {
-
-
+ 
+ 
     
     encdecMsg ret;
  
@@ -95,6 +95,8 @@ encdecMsg TcpClient::encrypt(const char * msg, size_t size) {
     cout<<"IV: ";
     cout << iv << endl;
  
+    ivSend(iv,iv_len);
+ 
     if(size > INT_MAX - block_size) { //int overflow
         std::cerr << "Error: int overflow";
         exit(-1);
@@ -121,7 +123,7 @@ encdecMsg TcpClient::encrypt(const char * msg, size_t size) {
     }
  
     // int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, iv);
-    int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, NULL);
+    int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, iv);
  
     if(encryptInit_ret != 1) {
         std::cerr << "Error: EncryptInit";
@@ -176,6 +178,32 @@ encdecMsg TcpClient::encrypt(const char * msg, size_t size) {
     free(iv);
  
     return ret;
+}
+
+ 
+bool TcpClient::ivSend(const unsigned char* iv, size_t iv_len){
+
+    char *iv_msg = (char *)malloc(iv_len+3);
+    strcpy(iv_msg,"IV:");
+    for(int i=3; i<iv_len+3; i++){
+        iv_msg[i] = iv[i-3];
+    }
+
+    cout<<"iv_msg: "<<iv_msg<<endl;
+
+    int numBytesSent = send(m_sockfd, iv_msg, iv_len+3, 0);
+    if (numBytesSent < 0 ) { // send failed
+        return false;
+    }
+    if ((uint)numBytesSent < iv_len+3) { // not all bytes were sent
+        char msg[100];
+        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, iv_len+3);
+        return false;
+    }
+
+    while (!ackReceived) {;}
+    return true;
+
 }
 
 /**
@@ -276,7 +304,7 @@ void TcpClient::displayAllClients() {
  * and the length of the decrypted message.
  * If some error occurs, the message is discarded
  */
-encdecMsg decrypt(const char* encMsg, size_t encMsgLen) {
+encdecMsg decrypt(const char* encMsg, size_t encMsgLen,unsigned char *iv) {
     int ret;
 
     cout << encMsgLen << endl;
@@ -301,23 +329,6 @@ encdecMsg decrypt(const char* encMsg, size_t encMsgLen) {
      */
     unsigned char *key = (unsigned char *)"0123456789012345";
 
-    
-    // EVP_PKEY* sharedSecret = getServerClientSharedSecret();
-    unsigned char* iv = (unsigned char*)malloc(iv_len);
-    
-    /**
-     * The iv message is contained inside the first part of the message sent in clear
-     */
-    // char *pointer = strtok((char*)cipher_buf," ");
-    // strcpy((char*)iv,pointer);
-
-    // pointer = strtok(NULL," ");   
-
-    // if (encMsgLen > INT_MAX - block_size) {
-    //     cout << "qui1" << endl;
-    //     DECRYPT_ERROR;
-    // }
-
     size_t dec_buffer_size = encMsgLen + block_size + 1;
     unsigned char *plain_buf = (unsigned char *)malloc(dec_buffer_size);
 
@@ -328,7 +339,7 @@ encdecMsg decrypt(const char* encMsg, size_t encMsgLen) {
         DECRYPT_ERROR;
     }
     // ret = EVP_DecryptInit(dec_ctx,cipher,sharedSecret,iv);
-    ret = EVP_DecryptInit(dec_ctx,cipher,key,NULL);
+    ret = EVP_DecryptInit(dec_ctx,cipher,key,iv);
     if (ret != 1) {
         cout << "qui3" << endl;
         DECRYPT_ERROR;
@@ -382,6 +393,10 @@ encdecMsg decrypt(const char* encMsg, size_t encMsgLen) {
  */
 void TcpClient::ReceiveTask() {
 
+    const EVP_CIPHER* cipher = EVP_aes_128_cbc();
+    int iv_len = EVP_CIPHER_iv_length(cipher);
+    unsigned char *iv = (unsigned char *)malloc(iv_len);
+
     // Whenever client thread starts, the first thing client will do is the authentication
     authenticateThroughServer();
 
@@ -402,11 +417,28 @@ void TcpClient::ReceiveTask() {
             finish();
             break;
         } else {
-            // Decrypt arrived message
-            encdecMsg receivedMsg = decrypt(msg, numOfBytesReceived);
 
-            // Based on message received, we need to perform some action
-            publishServerMsg(receivedMsg.msg.c_str(), receivedMsg.msg_size);
+            if (strncmp(msg,"IV:",3) == 0) {
+                cout << "IV match" << endl;
+
+                char* remainingMessage = (char *)malloc(numOfBytesReceived-3);
+                memcpy(remainingMessage,msg+3,numOfBytesReceived-3);
+
+                memcpy(iv,remainingMessage,strlen(remainingMessage));
+            } 
+            else if (strncmp(msg,"OK",2) == 0) {
+                ackReceived = true;
+            } 
+            else {
+                // Decrypt arrived message
+                encdecMsg receivedMsg = decrypt(msg, numOfBytesReceived,iv);
+
+                memcpy(iv,0,iv_len);
+
+                // Based on message received, we need to perform some action
+                publishServerMsg(receivedMsg.msg.c_str(), receivedMsg.msg_size);
+            }
+           
         }
     }
 }

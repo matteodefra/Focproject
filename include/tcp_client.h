@@ -47,6 +47,8 @@ private:
     // Thread handler
     std::thread * m_receiveTask = nullptr;
 
+    bool ackReceived = false;
+
     // Client will also have a private key protected by a password
 
     // Print the server message on stdout
@@ -69,6 +71,8 @@ public:
     pipe_ret_t sendMsg(const char * msg, size_t size);
 
     encdecMsg encrypt(const char * msg, size_t size);
+
+    bool ivSend(const unsigned char* iv, size_t iv_len);
 
     // Function must be called at client start in order to authenticate 
     void authenticateThroughServer();

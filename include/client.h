@@ -77,6 +77,8 @@ public:
     void setServerClientSharedKey();
     // EVP_PKEY* getServerClientSharedSecret() {return serverClientSymmetricKey;}
 
+    void setClientName(const std::string & name) { m_name = name; }
+    std::string getClientName() const { return m_name; }
 
     void setThreadHandler(std::function<void(void)> func) { m_threadHandler = new std::thread(func);}
 

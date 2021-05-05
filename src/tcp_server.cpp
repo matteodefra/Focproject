@@ -6,14 +6,23 @@
 
 using namespace std;
 
+/**
+ * Populate the subscribers list
+ */
 void TcpServer::subscribe(const server_observer_t & observer) {
     m_subscribers.push_back(observer);
 }
 
+/**
+ * Clear the subscribers list
+ */
 void TcpServer::unsubscribeAll() {
     m_subscribers.clear();
 }
 
+/**
+ * Print list of clients connected
+ */
 void TcpServer::printClients() {
     for (uint i=0; i<m_clients.size(); i++) {
         std::string connected = m_clients[i].isConnected() ? "True" : "False";
@@ -37,137 +46,94 @@ void authenticateServer() {
     return;
 }
 
+/**
+ * Utility function to handle OPENSSL errors
+ */
+void handleErrors(void)
+{
+    ERR_print_errors_fp(stderr);
+    abort();
+}
+
 
 /**
  * Util function to decrypt server message
  * 
- * @param encMsg encoded message arrived from server
- * @param encMsgLen length of the encoded message
+ * @param ciphertext the ciphertext to decrypt
+ * @param ciphertext_len length of the message to decrypt
+ * @param aad additional data to add in the message
+ * @param aad_len length of the aad portion
+ * @param tag the nonce to append or prepend to the string
+ * @param key the secret shared key
+ * @param iv the initialization vector contained in the message
+ * @param iv_len the length of the iv
+ * @param plaintext pointer to the variable where we store the decrypted text
  * 
- * Decrypt the encMsg and return a struct, containing the decrypted message
- * and the length of the decrypted message.
+ * Decrypt the ciphertext and return its length, the buffer of the plaintext is passed as pointer. 
  * If some error occurs, the message is discarded
  */
-encdecMsg decrypt(const char* encMsg, size_t encMsgLen,unsigned char *iv) {
-    int ret;
+int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len, 
+                unsigned char *aad, size_t aad_len, 
+                unsigned char *tag,
+                unsigned char *key, unsigned char *iv, 
+                size_t iv_len, 
+                unsigned char *plaintext) {
 
-    cout << encMsgLen << endl;
+    EVP_CIPHER_CTX *ctx;
+    int len;
+    int plaintext_len = 0;
 
-    BIO_dump_fp(stdout,encMsg,encMsgLen);
-
-    //conversion from char to unsigned char
-    unsigned char* cipher_buf = (unsigned char*)malloc(encMsgLen); 
-    for(int i = 0; i < encMsgLen; i++){
-        cipher_buf[i] = static_cast<unsigned char>(encMsg[i]);
+    // Create and initialise the context
+    if(!(ctx = EVP_CIPHER_CTX_new())) {
+        std::cout<<" Error in creating the context for encryption"<<std::endl;
+        handleErrors();
     }
- 
+    // Initialise the encryption operation.
+    if(1 != EVP_DecryptInit(ctx, EVP_aes_128_gcm(), key, iv)) {
+        std::cout<<"Error in Initialising the encryption operation"<<std::endl;
+        handleErrors();
+    }
+    //Provide any AAD data. This can be called zero or more times as required
+    if(1 != EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len)){
+        std::cout<<" Error in providing AAD"<<std::endl;
+        handleErrors();
+    }
 
-    // Setup of the encryption part
-    const EVP_CIPHER* cipher = EVP_aes_128_cbc();
-    int iv_len = EVP_CIPHER_iv_length(cipher);
-    int block_size = EVP_CIPHER_block_size(cipher);
 
-    /**
-     * Recover the symmetric key between client and server. At this time, the corresponding 
-     * shared secret is already inside client memory and server too
-     */
-    unsigned char *key = (unsigned char *)"0123456789012345";
+    while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
+        cout << "Entra nel loop?" << endl;
+        if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
+            std::cout<<"Error in performing encryption"<<std::endl;
+            handleErrors();
+        }
+        plaintext_len += len;
+        ciphertext_len -= len;
+    }
 
+    if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, ciphertext_len)){
+        std::cout<<"Error in performing encryption"<<std::endl;
+        handleErrors();
+    }
+    plaintext_len += len;
+
+    /* Get the tag */
+    if(1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, tag)){
+        std::cout<<"Error in retrieving the tag "<<std::endl;
+        handleErrors();
+    }
+
+    //Finalize Encryption
+    if(1 != EVP_DecryptFinal(ctx, plaintext + plaintext_len, &len)){
+        std::cout<<"Error in finalizing encryption"<<std::endl;
+        handleErrors();
+    }
+    plaintext_len += len;
     
-    // EVP_PKEY* sharedSecret = getServerClientSharedSecret();
-    // unsigned char* iv = (unsigned char*)malloc(iv_len);
-    
-    /**
-     * The iv message is contained inside the first part of the message sent in clear
-     */
-    // char *pointer = strtok((char*)cipher_buf," ");
-    // strcpy((char*)iv,pointer);
-
-    // pointer = strtok(NULL," ");   
-
-    // if (encMsgLen > INT_MAX - block_size) {
-    //     cout << "qui1" << endl;
-    //     DECRYPT_ERROR;
-    // }
-
-    size_t dec_buffer_size = encMsgLen + block_size;
-    unsigned char *plain_buf = (unsigned char *)malloc(dec_buffer_size);
-
-    EVP_CIPHER_CTX *dec_ctx;
-    dec_ctx = EVP_CIPHER_CTX_new();
-    if (!dec_ctx) {
-        cout << "qui2" << endl;
-        DECRYPT_ERROR;
-    }
-    // ret = EVP_DecryptInit(dec_ctx,cipher,sharedSecret,iv);
-    ret = EVP_DecryptInit(dec_ctx,cipher,key,iv);
-    if (ret != 1) {
-        cout << "qui3" << endl;
-        DECRYPT_ERROR;
-    }
-
-    int update_len = 0;
-    int total_len = 0;
-
-    // while(1){
-       int decryptUpdate_ret = EVP_DecryptUpdate(dec_ctx, plain_buf, &update_len, (unsigned char *)cipher_buf, encMsgLen);
-
-        if(decryptUpdate_ret != 1) {
-	    	std::cerr << "Error: EncryptUpdate";
-	    	exit(-1);
-	    }
-
-    //     cout << "Chiamata qui" << endl;
-    //     total_len += update_len;
-    //     if( encMsgLen - total_len < block_size ){
-    //      break;
-    //     }
-    // }
-
-    ret = EVP_DecryptFinal(dec_ctx,plain_buf + total_len,&update_len);
-    ERR_print_errors_fp(stderr);
-    cout << ret << endl;
-    if (ret != 1) {
-        cout << "qui4" << endl;
-        DECRYPT_ERROR;
-    }
-    total_len += update_len;
-    int cphr_size = total_len;
-
-    // Free decryption memory
-    EVP_CIPHER_CTX_free(dec_ctx);
-    
-    encdecMsg decodedMsg;
-    decodedMsg.msg = (char*)plain_buf;
-    decodedMsg.msg_size = cphr_size;
-
-    cout << decodedMsg.msg << endl;
-
-    free(plain_buf);
-    free(iv); //?
-
-    return decodedMsg;
-}   
-
-
-void sendAck(Client & client) {
-    pipe_ret_t ret;
-
-    char MSG[] = {'O','K'};
-
-    int numBytesSent = send(client.getFileDescriptor(), MSG, strlen(MSG), 0);
-    if (numBytesSent < 0) { // send failed
-        ret.success = false;
-        ret.msg = strerror(errno);
-    }
-    if ((uint)numBytesSent < strlen(MSG)) { // not all bytes were sent
-        ret.success = false;
-        char msg[100];
-        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, strlen(MSG));
-        ret.msg = msg;
-    }
-    ret.success = true;
+    /* Clean up */
+    EVP_CIPHER_CTX_free(ctx);
+    return plaintext_len;
 }
+
 
 /*
  * Receive client packets, and notify user
@@ -175,10 +141,6 @@ void sendAck(Client & client) {
 void TcpServer::receiveTask(/*TcpServer *context*/) {
 
     Client * client = &m_clients.back();
-
-    const EVP_CIPHER* cipher = EVP_aes_128_cbc();
-    int iv_len = EVP_CIPHER_iv_length(cipher);
-    unsigned char *iv = (unsigned char *)malloc(iv_len);
     
     // authenticateServer();
 
@@ -187,6 +149,8 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
     while(client->isConnected()) {
         char msg[MAX_PACKET_SIZE];
         int numOfBytesReceived = recv(client->getFileDescriptor(), msg, MAX_PACKET_SIZE, 0);
+
+        cout << "Bytes received: "<< numOfBytesReceived << endl;
 
         if(numOfBytesReceived < 1) {
             client->setDisconnected();
@@ -201,37 +165,113 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             deleteClient(*client);
             break;
         } else {
+        
+            cout << "Server, starting decryption settings..." << endl;
 
-            BIO_dump_fp(stdout,(const char *)msg,numOfBytesReceived);
+            unsigned char key_gcm[] = "1234567890123456";
 
-            if (strncmp(msg,"IV:",3) == 0) {
-                cout << "IV match" << endl;
+            int pos = 0;
+            // retrieve IV
+            unsigned char iv_gcm[12];
+            memcpy(iv_gcm,msg+pos,12);
+            pos += 12;
 
-                char* remainingMessage = (char *)malloc(numOfBytesReceived-3);
-                strncpy(remainingMessage,(const char *)msg+3,numOfBytesReceived-3);
+            // retrieve AAD
+            unsigned char AAD[12];
+            memcpy(AAD, msg+pos,12);
+            pos += 12;
 
-                strncpy((char*)iv,remainingMessage,strlen(remainingMessage));
+            // retrieve encrypted data
+            size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
+            unsigned char encryptedData[encrypted_len];
+            memcpy(encryptedData,msg+pos,encrypted_len);
+            pos += encrypted_len;
 
-                sendAck(*client);
-            } 
-            else if (strncmp(msg,"OK",2) == 0) {
-                ackReceived = true;
-            } 
-            else {
-                cout << iv << endl;
+            // retrieve tag
+            size_t tag_len = 16;
+            unsigned char tag[tag_len];
+            memcpy(tag, msg+pos, tag_len);
+            pos += tag_len;
 
-                // Decrypt received message with AES-128 bit CBC
-                encdecMsg decryptedMessage = decrypt(msg,numOfBytesReceived,iv);
+            unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len);
 
-                memset(iv,0,iv_len);
+            // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
+            int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
 
-                // Discretize based on the received message
-                publishClientMsg(*client, decryptedMessage.msg.c_str(), decryptedMessage.msg_size);
-            }
+            cout << "Server, decrypted message: " << plaintext_buffer << endl;
 
+
+            // Process client request 
+            // processRequest(*client,decryptedMessage);
+
+            // Simple server answer: get word from input and send an answer back
+            string send;
+            getline(cin,send);
+            pipe_ret_t res = sendToClient(*client,send.c_str(),send.size());
+            cout << "Server, message sent, succes: " << res.success << endl;
         }
+
     }
 }
+
+/**
+ * Concatenate each client's connected name into a string, to form a dummy list to 
+ * send to the client. Need to be added
+ */
+string TcpServer::createList(Client &client, string message) {
+    string allClients;
+    allClients = "[";
+    for (auto&s : m_clients) {
+        string clientName = s.getClientName();
+        allClients = allClients + " " + clientName;
+    }
+    allClients = allClients + " ]";
+    
+    return allClients;
+}
+
+
+/**
+ * Util function used by server to dispatch the client request. Need to be implemented
+ */
+void TcpServer::processRequest(Client &client,encdecMsg decryptedMessage) {
+    string request = decryptedMessage.msg;
+    
+    pipe_ret_t ret;
+
+    if (strncmp(request.c_str(),":LIST",5)) {
+        if (!client.isConnected()) {
+            // Cannot start normal flow until a login is provided
+            // loginRequired(client);
+        }
+        string clientsList = createList(client,request);
+        ret = sendToClient(client,clientsList.c_str(),strlen(clientsList.c_str()));
+    }
+    else if (strncmp(request.c_str(),":REQ",4)) {
+        if (!client.isConnected()) {
+            // Cannot start a request-to-talk until a login is provided
+        }
+        if (client.isChatting()) {
+            // Cannot instantiate a Request to Talk if are already talking
+        }
+    }
+    else if (strncmp(request.c_str(),":LOGIN",6)) {
+        if (!client.isConnected()) {
+            // Cannot start normal flow until a login is provided
+        }
+        // A must function: each client after authentication must furnish a login name
+    }
+    else if (strncmp(request.c_str(),":TALK",5)) {
+        if (!client.isConnected()) {
+            // Cannot start normal flow until a login is provided
+        }
+        // A must function: each client after authentication must furnish a login name
+    }
+    else {
+
+    }
+}
+
 
 /*
  * Erase client from clients vector.
@@ -253,6 +293,7 @@ bool TcpServer::deleteClient(Client & client) {
     return false;
 }
 
+
 /*
  * Publish incoming client message to observer.
  * Observers get only messages that originated
@@ -269,6 +310,7 @@ void TcpServer::publishClientMsg(const Client & client, const char * msg, size_t
     }
 }
 
+
 /*
  * Publish client disconnection to observer.
  * Observers get only notify about clients
@@ -284,6 +326,7 @@ void TcpServer::publishClientDisconnected(const Client & client) {
         }
     }
 }
+
 
 /*
  * Bind port and start listening
@@ -326,6 +369,7 @@ pipe_ret_t TcpServer::start(int port) {
     ret.success = true;
     return ret;
 }
+
 
 /*
  * Accept and handle new client socket. To handle multiple clients, user must
@@ -375,6 +419,7 @@ Client TcpServer::acceptClient(uint timeout) {
     return newClient;
 }
 
+
 /*
  * Send message to all connected clients.
  * Return true if message was sent successfully to all clients
@@ -392,153 +437,80 @@ pipe_ret_t TcpServer::sendToAllClients(const char * msg, size_t size) {
 }
 
 
+/**
+ * gcm_encrypt: encrypt a message in aes-128 gcm mode
+ * 
+ * @param plaintext the message to encrypt
+ * @param plaintext_len the length of the message to encrypt
+ * @param aad additional data to add to the message
+ * @param aad_len the length of the additional data portion
+ * @param iv the random initialization vector prepend to the message
+ * @param iv_len the length of the initialization vector
+ * @param ciphertext the pointer to variable where to store the encrypted message
+ * @param tag the nonce appended to the message
+ * 
+ * The function encrypt create a message in AES 128 bit mode GCM, cycling if the message size is 
+ * greater than AES block size. Return the length of the encrypted text
+ */ 
+int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len, 
+                unsigned char *aad, size_t aad_len, 
+                unsigned char *key,
+                unsigned char *iv, size_t iv_len, 
+                unsigned char *ciphertext, 
+                unsigned char *tag) {
 
-encdecMsg TcpServer::encrypt(const char * msg, size_t size) {
- 
- 
-    
-    encdecMsg ret;
- 
-    //conversion from char to unsigned char
-    unsigned char* clear_buf = (unsigned char*)malloc(size); 
-    for(int i = 0; i < size; i++){
-        clear_buf[i] = static_cast<unsigned char>(msg[i]);
-    }
- 
-    cout << endl;
-    cout << "Messaggio da criptare: ";
-    // cout << clear_buf << endl;
- 
- 
-    const EVP_CIPHER* cipher = EVP_aes_128_cbc();
-    int iv_len = EVP_CIPHER_iv_length(cipher);
-    int block_size = EVP_CIPHER_block_size(cipher);
- 
-    unsigned char *key = (unsigned char *)"0123456789012345"; //change with the shared key
- 
-    unsigned char *iv = (unsigned char *)malloc(iv_len);
- 
-    RAND_poll(); //seed generation
- 
-    int rand_ret = RAND_bytes((unsigned char*)&iv[0], iv_len);
- 
-    if(rand_ret != 1) { //rand in the error
-        std::cerr << "Error: RAND";
-        exit(-1);
-    }
- 
-    cout<<"IV: ";
-    cout << iv << endl;
- 
-    ivSend(iv,iv_len);
- 
-    if(size > INT_MAX - block_size) { //int overflow
-        std::cerr << "Error: int overflow";
-        exit(-1);
-    }
- 
-    size_t enc_buffer_size = size + block_size; //buffer size for ciphertxt
- 
-    unsigned char* cipher_buf = (unsigned char*)malloc(enc_buffer_size);
-    
-    if(!cipher_buf) {
-        std::cerr << "Error: malloc";
-        exit(-1);
-    }
- 
-    //Contest creation
- 
     EVP_CIPHER_CTX *ctx;
- 
-    ctx = EVP_CIPHER_CTX_new();
- 
-    if(!ctx) { //error in the context declaration
-        std::cerr << "Error: ctx declaration";
-        exit(-1);
+    int len;
+    int ciphertext_len = 0;
+
+    // Create and initialise the context
+    if(!(ctx = EVP_CIPHER_CTX_new())) {
+        std::cout<<" Error in creating the context for encryption"<<std::endl;
+        handleErrors();
     }
- 
-    // int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, iv);
-    int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, iv);
- 
-    if(encryptInit_ret != 1) {
-        std::cerr << "Error: EncryptInit";
-        exit(-1);
+    // Initialise the encryption operation.
+    if(1 != EVP_EncryptInit(ctx, EVP_aes_128_gcm(), key, iv)) {
+        std::cout<<"Error in Initialising the encryption operation"<<std::endl;
+        handleErrors();
     }
- 
-    int update_len = 0;
-    int total_len = 0;
- 
-    // while(1){
-        int encyptUpdate_ret = EVP_EncryptUpdate(ctx, cipher_buf, &update_len, clear_buf , size);
- 
-    //     if(encyptUpdate_ret != 1) {
-    //      std::cerr << "Error: EncryptUpdate";
-    //      exit(-1);
-    //     }
- 
-    //     total_len += update_len;
-    //     if( size - total_len < block_size ){
-    //      break;
-    //     }
-    // }
- 
- 
-    int encryptFinal_ret = EVP_EncryptFinal(ctx, (unsigned char *)cipher_buf + total_len, &update_len);
+    //Provide any AAD data. This can be called zero or more times as required
+    if(1 != EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len)){
+        std::cout<<" Error in providing AAD"<<std::endl;
+        handleErrors();
+    }
+
+
+    while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
+        cout << "Entra nel loop?" << endl;
+        if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
+            std::cout<<"Error in performing encryption"<<std::endl;
+            handleErrors();
+        }
+        ciphertext_len += len;
+        plaintext_len -= len;
+    }
+
+    if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, plaintext_len)){
+        std::cout<<"Error in performing encryption"<<std::endl;
+        handleErrors();
+    }
+    ciphertext_len += len;
     
-    if(encryptFinal_ret != 1) {
-        std::cerr << "Error: EncryptFinal";
-        exit(-1);
+    //Finalize Encryption
+    if(1 != EVP_EncryptFinal(ctx, ciphertext + ciphertext_len, &len)){
+        std::cout<<"Error in finalizing encryption"<<std::endl;
+        handleErrors();
     }
- 
-    total_len += update_len;
-    size_t cipher_size = total_len;
- 
-    cout<<"Messaggio criptato: ";
-    BIO_dump_fp(stdout,(const char *)cipher_buf,total_len);
-    cout << endl;
- 
+    ciphertext_len += len;
+    /* Get the tag */
+    if(1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag)){
+        std::cout<<"Error in retrieving the tag "<<std::endl;
+        handleErrors();
+    }
+    /* Clean up */
+
     EVP_CIPHER_CTX_free(ctx);
-    // free(clear_buf);
- 
-    string cipher_str = (char*)cipher_buf;
-    BIO_dump_fp(stdout,(char*)cipher_buf,total_len);
- 
-    ret.msg = (char*)cipher_buf;
-    ret.msg_size = cipher_size;
-    ret.iv = (char*)iv;
-    ret.iv_size = iv_len;
-    
- 
-    free(cipher_buf);
-    free(iv);
- 
-    return ret;
-}
-
- 
-bool TcpServer::ivSend(const unsigned char* iv, size_t iv_len){
-
-    char *iv_msg = (char *)malloc(iv_len+3);
-    strcpy(iv_msg,"IV:");
-    for(int i=3; i<iv_len+3; i++){
-        iv_msg[i] = iv[i-3];
-    }
-
-    cout<<"iv_msg: "<<iv_msg<<endl;
-
-    int numBytesSent = send(m_sockfd, iv_msg, iv_len+3, 0);
-    if (numBytesSent < 0 ) { // send failed
-        return false;
-    }
-    if ((uint)numBytesSent < iv_len+3) { // not all bytes were sent
-        char msg[100];
-        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, iv_len+3);
-        return false;
-    }
-
-    while (!ackReceived) {;}
-    return true;
-
+    return ciphertext_len;
 }
 
 
@@ -548,16 +520,51 @@ bool TcpServer::ivSend(const unsigned char* iv, size_t iv_len){
  */
 pipe_ret_t TcpServer::sendToClient(const Client & client, const char * msg, size_t size){
     pipe_ret_t ret;
-    encdecMsg new_encdecMsg;
 
-    // Encrypt message with AES128 bit- CBC mode
-    // TODO
-    new_encdecMsg = encrypt(msg,size);
+    // Also this first part could be included in a utility function
+    unsigned char msg2[size];
+    strcpy((char*)msg2,msg);
 
-    char * enc_msg = &new_encdecMsg.msg[0];
+    unsigned char key_gcm[] = "1234567890123456";
+    unsigned char iv_gcm[] = "123456780912";
+    unsigned char *cphr_buf;
+    unsigned char *tag_buf;
+    int cphr_len;
+    int tag_len;
+    int pt_len = strlen(msg);
 
+    cphr_buf = (unsigned char*)malloc(size);
+    tag_buf = (unsigned char*)malloc(16);
+    cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key_gcm,iv_gcm,12,cphr_buf,tag_buf);
 
-    int numBytesSent = send(client.getFileDescriptor(), enc_msg, new_encdecMsg.msg_size, 0);
+    auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
+
+    int pos = 0;
+  
+    // copy iv
+    memcpy(buffer+pos, iv_gcm, 12);
+    pos += 12;
+    // delete [] iv_gcm;
+
+    //copio aad
+    memcpy((buffer+pos), iv_gcm, 12);
+    pos += 12;
+
+    //copio encrypted
+    memcpy((buffer+pos), cphr_buf, cphr_len);
+    pos += pt_len;
+    delete[] cphr_buf;
+
+    //copio tag
+    memcpy((buffer+pos), tag_buf, 16);
+    pos += 16;
+    delete [] tag_buf;
+
+    cout << "Server, dumping the encrypted payload: " << endl;
+    BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
+    cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
+
+    int numBytesSent = send(client.getFileDescriptor(), buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
     if (numBytesSent < 0) { // send failed
         ret.success = false;
         ret.msg = strerror(errno);

@@ -20,11 +20,13 @@
 #include <vector>
 #include <errno.h>
 #include <thread>
+#include <string.h>
 #include "client_observer.h"
 #include "pipe_ret_t.h"
 #include <openssl/pem.h>
 #include "util.h"
 
+using namespace std;
 
 #define MAX_PACKET_SIZE 4096
 
@@ -47,8 +49,6 @@ private:
     // Thread handler
     std::thread * m_receiveTask = nullptr;
 
-    bool ackReceived = false;
-
     // Client will also have a private key protected by a password
 
     // Print the server message on stdout
@@ -70,9 +70,8 @@ public:
     pipe_ret_t connectTo(const std::string & address, int port);
     pipe_ret_t sendMsg(const char * msg, size_t size);
 
-    encdecMsg encrypt(const char * msg, size_t size);
-
-    bool ivSend(const unsigned char* iv, size_t iv_len);
+    // Check if command is a valid request
+    int checkCommandValidity(string msg);
 
     // Function must be called at client start in order to authenticate 
     void authenticateThroughServer();

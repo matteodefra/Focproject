@@ -21,7 +21,9 @@
 #include "client.h"
 #include "server_observer.h"
 #include "pipe_ret_t.h"
+#include "util.h"
 
+using namespace std;
 
 #define MAX_PACKET_SIZE 4096
 
@@ -68,6 +70,12 @@ public:
 
     // Delete a client from list (due to disconnection or logout)
     bool deleteClient(Client & client);
+
+    //
+    string createList(Client &client, std::string message);
+
+    //
+    void processRequest(Client &client,encdecMsg decryptedMessage);
 
     // Add or remove eventually new observers
     void subscribe(const server_observer_t & observer);

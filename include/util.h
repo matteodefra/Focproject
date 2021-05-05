@@ -18,5 +18,7 @@ struct encdecMsg {
 #define DECRYPT_ERROR \
     encdecMsg error; \
     error.msg = "error"; \
-    error.size = 6; \
+    error.msg_size = 6; \
     return error; 
+
+    

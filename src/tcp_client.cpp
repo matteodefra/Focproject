@@ -1,18 +1,44 @@
 #include "../include/tcp_client.h"
-#include "../include/util.h"
 #include "../include/client.h"
+#include <algorithm> 
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
-=======
-#include <openssl/evp.h>
-#include <openssl/pem.h>
-#include <openssl/rand.h>
+#include <openssl/err.h>
 
+using namespace std;
+
+void helpMsg(){
+    cout<<"********************************************************************"<<endl;
+    cout<<"LIST OF AVAILABLE COMMANDS:"<<endl;
+    cout<<":LIST -> show the list of all connected clients to the server"<<endl;
+    cout<<":REQ x -> send a request to talk to the client with username x"<<endl;
+    cout<<":LOGIN -> log in to the service"<<endl;
+    cout<<"********************************************************************"<<endl;
+    cout<<endl;
+}
+
+int TcpClient::checkCommandValidity(string msg) { 
+ 
+    if(msg.compare(":LIST")==0 || msg.compare(":LOGIN")==0) {
+        return 0;
+    }
+    else if(msg.compare(":HELP")==0) {
+        helpMsg(); 
+        return -1;
+    } 
+    else if(msg.rfind(":REQ ", 0) == 0 ){
+        size_t num_blank = count(msg.begin(), msg.end(),' ');
+        if(num_blank>1 || msg.length() < 6) return -2;
+            else return 0;
+    }
+     else return -2;
+ 
+}
+ 
 
 // Connect the client to the server by passing the IP address of the server and the port
 // Returns a pipe_ret_t instance
-
 pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
     m_sockfd = 0;
     pipe_ret_t ret;
@@ -56,125 +82,144 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
     return ret;
 }
 
-
 /**
- * Encrypt the message with AES-128 bit in CBC mode.
- * Return a struct containing message and length 
+ * Utility function to handle OPENSSL errors
  */
-encdecMsg encrypt(const char * msg, size_t size) {
-
-    encdecMsg ret;
-
-    //conversion from char to unsigned char
-    unsigned char* clear_buf = (unsigned char*)malloc(size); 
-    for(int i = 0; i < size; i++){
-        clear_buf[i] = static_cast<unsigned char>(msg[i]);
-    }
-
-    const EVP_CIPHER* cipher = EVP_aes_128_cbc();
-	int iv_len = EVP_CIPHER_iv_length(cipher);
-	int block_size = EVP_CIPHER_block_size(cipher);
-
-    unsigned char *key = (unsigned char *)"0123456789012345"; //change with the shared key
-	unsigned char *iv = (unsigned char *)malloc(iv_len);
-
-    RAND_poll(); //seed generation
-
-    int rand_ret = RAND_bytes((unsigned char*)&iv[0], iv_len);
-
-    if(rand_ret != 1) { //rand in the error
-		std::cerr << "Error: RAND";
-		exit(-1);
-	}
-
-    if(size > INT_MAX - block_size) { //int overflow
-		std::cerr << "Error: int overflow";
-		exit(-1);
-	}
-
-    size_t enc_buffer_size = size + block_size; //buffer size for ciphertxt
-
-    unsigned char* cipher_buf = (unsigned char*)malloc(enc_buffer_size);
-    
-    if(!cipher_buf) {
-		std::cerr << "Error: malloc";
-		exit(-1);
-	}
-
-    //Contest creation
-
-    EVP_CIPHER_CTX *ctx;
-
-	ctx = EVP_CIPHER_CTX_new();
-
-	if(!ctx) { //error in the context declaration
-		std::cerr << "Error: ctx declaration";
-		exit(-1);
-	}
-
-	int encryptInit_ret = EVP_EncryptInit(ctx, cipher, key, iv);
-
-	if(encryptInit_ret != 1) {
-		std::cerr << "Error: EncryptInit";
-		exit(-1);
-	}
-
-	int update_len = 0;
-	int total_len = 0;
-
-    while(1){
-        int encyptUpdate_ret = EVP_EncryptUpdate(ctx, cipher_buf, &update_len, clear_buf, size);
-
-        if(encyptUpdate_ret != 1) {
-	    	std::cerr << "Error: EncryptUpdate";
-	    	exit(-1);
-	    }
-
-        total_len += update_len;
-        if( size - total_len < block_size ){
-         break;
-        }
-    }
-
-    int encryptFinal_ret = EVP_EncryptFinal(ctx, cipher_buf + total_len, &update_len);
-	
-    if(encryptFinal_ret != 1) {
-		std::cerr << "Error: EncryptFinal";
-		exit(-1);
-	}
-
-	total_len += update_len;
-	size_t cipher_size = total_len;
-
-    EVP_CIPHER_CTX_free(ctx);
-    free(clear_buf);
-
-    ret.msg = (char*)cipher_buf;
-    ret.msg_size = size;
-    ret.iv = (char*)iv;
-    ret.iv_size = iv_len;
-
-    free(cipher_buf);
-    free(iv);
-
-    return ret;
+void handleErrors(void)
+{
+    ERR_print_errors_fp(stderr);
+    abort();
 }
 
 /**
- * This function will need to implement secure symmetric communication 
- * through the symmetric key negotiated in the first part
- */
-pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) { //clear 
-    pipe_ret_t ret;
-    encdecMsg new_encdecMsg;
-    // We must create here before the secure message
-    // Read .pem key and create secure msg
-    // AES-128 CBC bit
-    new_encdecMsg = encrypt(msg,size);
+ * gcm_encrypt: encrypt a message in aes-128 gcm mode
+ * 
+ * @param plaintext the message to encrypt
+ * @param plaintext_len the length of the message to encrypt
+ * @param aad additional data to add to the message
+ * @param aad_len the length of the additional data portion
+ * @param iv the random initialization vector prepend to the message
+ * @param iv_len the length of the initialization vector
+ * @param ciphertext the pointer to variable where to store the encrypted message
+ * @param tag the nonce appended to the message
+ * 
+ * The function encrypt create a message in AES 128 bit mode GCM, cycling if the message size is 
+ * greater than AES block size. Return the length of the encrypted text
+ */ 
+int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len, 
+                unsigned char *aad, size_t aad_len, 
+                unsigned char *key,
+                unsigned char *iv, size_t iv_len, 
+                unsigned char *ciphertext, 
+                unsigned char *tag) {
 
+    EVP_CIPHER_CTX *ctx;
+    int len;
+    int ciphertext_len = 0;
+
+    // Create and initialise the context
+    if(!(ctx = EVP_CIPHER_CTX_new())) {
+        std::cout<<" Error in creating the context for encryption"<<std::endl;
+        handleErrors();
+    }
+    // Initialise the encryption operation.
+    if(1 != EVP_EncryptInit(ctx, EVP_aes_128_gcm(), key, iv)) {
+        std::cout<<"Error in Initialising the encryption operation"<<std::endl;
+        handleErrors();
+    }
+    //Provide any AAD data. This can be called zero or more times as required
+    if(1 != EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len)){
+        std::cout<<" Error in providing AAD"<<std::endl;
+        handleErrors();
+    }
+
+
+    while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
+        cout << "Entra nel loop?" << endl;
+        if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
+            std::cout<<"Error in performing encryption"<<std::endl;
+            handleErrors();
+        }
+        ciphertext_len += len;
+        plaintext_len -= len;
+    }
+
+    if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, plaintext_len)){
+        std::cout<<"Error in performing encryption"<<std::endl;
+        handleErrors();
+    }
+    ciphertext_len += len;
+    
+    //Finalize Encryption
+    if(1 != EVP_EncryptFinal(ctx, ciphertext + ciphertext_len, &len)){
+        std::cout<<"Error in finalizing encryption"<<std::endl;
+        handleErrors();
+    }
+    ciphertext_len += len;
+    /* Get the tag */
+    if(1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag)){
+        std::cout<<"Error in retrieving the tag "<<std::endl;
+        handleErrors();
+    }
+    /* Clean up */
+
+    EVP_CIPHER_CTX_free(ctx);
+    return ciphertext_len;
+}
+
+
+/**
+ * Allow a client to send a message to the server. The first setting + encryption call could also be inserted 
+ * directly in a utility function, returning the buffer variable since it is the final value we need
+ */
+pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) { 
+    pipe_ret_t ret;
+
+    // Also this section could be moved in an utility function
+    unsigned char msg2[size];
+    strcpy((char*)msg2,msg);
+
+    unsigned char key_gcm[] = "1234567890123456";
+    unsigned char iv_gcm[] = "123456780912";
+    unsigned char *cphr_buf;
+    unsigned char *tag_buf;
+    int cphr_len;
+    int tag_len;
+    int pt_len = strlen(msg);
+
+    cphr_buf = (unsigned char*)malloc(size);
+    tag_buf = (unsigned char*)malloc(16);
+    cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key_gcm,iv_gcm,12,cphr_buf,tag_buf);
+
+    auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
+
+    int pos = 0;
+  
+    // copy iv
+    memcpy(buffer+pos, iv_gcm, 12);
+    pos += 12;
+    // delete [] iv_gcm;
+
+    // copy aad
+    memcpy((buffer+pos), iv_gcm, 12);
+    pos += 12;
+
+    // copy encrypted data
+    memcpy((buffer+pos), cphr_buf, cphr_len);
+    pos += pt_len;
+    delete[] cphr_buf;
+
+    // copy tag
+    memcpy((buffer+pos), tag_buf, 16);
+    pos += 16;
+    delete [] tag_buf;
+
+    cout << "Client, dumping the encrypted payload: " << endl;
+    BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
+    cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
 
     // Change name accordingly
-    int numBytesSent = send(m_sockfd, msg, size, 0);
+    int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
     if (numBytesSent < 0 ) { // send failed
         ret.success = false;
         ret.msg = strerror(errno);
@@ -251,77 +296,81 @@ void TcpClient::displayAllClients() {
 /**
  * Util function to decrypt server message
  * 
- * @param encMsg encoded message arrived from server
- * @param encMsgLen length of the encoded message
+ * @param ciphertext the ciphertext to decrypt
+ * @param ciphertext_len length of the message to decrypt
+ * @param aad additional data to add in the message
+ * @param aad_len length of the aad portion
+ * @param tag the nonce to append or prepend to the string
+ * @param key the secret shared key
+ * @param iv the initialization vector contained in the message
+ * @param iv_len the length of the iv
+ * @param plaintext pointer to the variable where we store the decrypted text
  * 
- * Decrypt the encMsg and return a struct, containing the decrypted message
- * and the length of the decrypted message.
+ * Decrypt the ciphertext and return its length, the buffer of the plaintext is passed as pointer. 
  * If some error occurs, the message is discarded
  */
-encdecMsg decrypt(unsigned char* encMsg, int encMsgLen) {
-    int ret;
+int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len, 
+                unsigned char *aad, size_t aad_len, 
+                unsigned char *tag,
+                unsigned char *key, unsigned char *iv, 
+                size_t iv_len, 
+                unsigned char *plaintext) {
 
-    // Setup of the encryption part
-    const EVP_CIPHER* cipher = EVP_aes_128_cbc();
-    int iv_len = EVP_CIPHER_iv_length(cipher);
-    int block_size = EVP_CIPHER_block_size(cipher);
+    EVP_CIPHER_CTX *ctx;
+    int len;
+    int plaintext_len = 0;
 
-    /**
-     * Recover the symmetric key between client and server. At this time, the corresponding 
-     * shared secret is already inside client memory and server too
-     */
-    unsigned char *key = (unsigned char *)"0123456789012345";
-
-    // EVP_PKEY* sharedSecret = getServerClientSharedSecret();
-    unsigned char* iv = (unsigned char*)malloc(iv_len);
-    RAND_poll();
-    ret = RAND_bytes((unsigned char*)&iv[0],iv_len);
-    if (ret != 1) {
-        DECRYPT_ERROR;
+    // Create and initialise the context
+    if(!(ctx = EVP_CIPHER_CTX_new())) {
+        std::cout<<" Error in creating the context for encryption"<<std::endl;
+        handleErrors();
+    }
+    // Initialise the encryption operation.
+    if(1 != EVP_DecryptInit(ctx, EVP_aes_128_gcm(), key, iv)) {
+        std::cout<<"Error in Initialising the encryption operation"<<std::endl;
+        handleErrors();
+    }
+    //Provide any AAD data. This can be called zero or more times as required
+    if(1 != EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len)){
+        std::cout<<" Error in providing AAD"<<std::endl;
+        handleErrors();
     }
 
-    int dec_buffer_size = encMsgLen + block_size;
-    unsigned char *cphr_buf = (unsigned char *)malloc(dec_buffer_size);
-
-    EVP_CIPHER_CTX *dec_ctx;
-    dec_ctx = EVP_CIPHER_CTX_new();
-    if (!dec_ctx) {
-        DECRYPT_ERROR;
-    }
-    // ret = EVP_DecryptInit(dec_ctx,cipher,sharedSecret,iv);
-    ret = EVP_DecryptInit(dec_ctx,cipher,key,iv);
-    if (ret != 1) {
-        DECRYPT_ERROR;
+    // Needed for comparison between size_t and integer
+    while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
+        cout << "Entra nel loop?" << endl;
+        if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
+            std::cout<<"Error in performing encryption"<<std::endl;
+            handleErrors();
+        }
+        plaintext_len += len;
+        ciphertext_len -= len;
     }
 
-    int update_len = 0;
-    int total_len = 0;
-
-    while ((EVP_DecryptUpdate(dec_ctx,cphr_buf,&update_len,encMsg,encMsgLen)) != 1) {
-        DECRYPT_ERROR;
+    if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, ciphertext_len)){
+        std::cout<<"Error in performing encryption"<<std::endl;
+        handleErrors();
     }
-    total_len += update_len;
+    plaintext_len += len;
 
-    ret = EVP_DecryptFinal(dec_ctx,cphr_buf + total_len,&update_len);
-    if (ret != 1) {
-        DECRYPT_ERROR;
+    /* Get the tag */
+    if(1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, tag)){
+        std::cout<<"Error in retrieving the tag "<<std::endl;
+        handleErrors();
     }
-    total_len += update_len;
-    int cphr_size = total_len;
 
-    // Free decryption memory
-    EVP_CIPHER_CTX_free(dec_ctx);
+    //Finalize Encryption
+    if(1 != EVP_DecryptFinal(ctx, plaintext + plaintext_len, &len)){
+        std::cout<<"Error in finalizing encryption"<<std::endl;
+        handleErrors();
+    }
+    plaintext_len += len;
     
-    encdecMsg decodedMsg;
-    std::string decodedString( reinterpret_cast<char const*>(cphr_buf), cphr_size ) ;
-    decodedMsg.msg = decodedString;
-    decodedMsg.size = cphr_size;
+    /* Clean up */
+    EVP_CIPHER_CTX_free(ctx);
+    return plaintext_len;
+}
 
-    free(cphr_buf);
-    free(iv); //?
-
-    return decodedMsg;
-}   
 
 /*
  * Receive server packets, and notify user
@@ -348,15 +397,51 @@ void TcpClient::ReceiveTask() {
             finish();
             break;
         } else {
-            // Decrypt arrived message
-            encdecMsg receivedMsg = decrypt((unsigned char*)msg, numOfBytesReceived);
+            // Also this part could be included in a utility function returning only the decrypted message
+
+            cout << "Client: start decryption process..." << endl;
+
+            unsigned char key_gcm[] = "1234567890123456";
+
+            int pos = 0;
+            // retrieve IV
+            unsigned char iv_gcm[12];
+            memcpy(iv_gcm,msg+pos,12);
+            pos += 12;
+
+            // retrieve AAD
+            unsigned char AAD[12];
+            memcpy(AAD, msg+pos,12);
+            pos += 12;
+
+            // retrieve encrypted data
+            size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
+            unsigned char encryptedData[encrypted_len];
+            memcpy(encryptedData,msg+pos,encrypted_len);
+            pos += encrypted_len;
+
+            // retrieve tag
+            size_t tag_len = 16;
+            unsigned char tag[tag_len];
+            memcpy(tag, msg+pos, tag_len);
+            pos += tag_len;
+
+            unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len);
+
+            // Decrypt received message with AES-128 bit GCM
+            int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
+            
+            cout << "Client, message decrypted: " << plaintext_buffer << endl;
 
             // Based on message received, we need to perform some action
-            publishServerMsg(receivedMsg.msg.c_str(), receivedMsg.size);
+            publishServerMsg((char*)plaintext_buffer,decrypted_len);
         }
     }
 }
 
+/**
+ * Close thread instance and socket
+ */
 pipe_ret_t TcpClient::finish(){
     stop = true;
     terminateReceiveThread();
@@ -370,6 +455,9 @@ pipe_ret_t TcpClient::finish(){
     return ret;
 }
 
+/**
+ * Close thread instance
+ */
 void TcpClient::terminateReceiveThread() {
     if (m_receiveTask != nullptr) {
         m_receiveTask->detach();

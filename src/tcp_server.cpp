@@ -202,7 +202,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
 
             // Process client request 
-            // processRequest(*client,decryptedMessage);
+            // processRequest(*client,plaintext_buffer);
 
             // Simple server answer: get word from input and send an answer back
             string send;
@@ -213,6 +213,56 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
     }
 }
+
+/**
+ * Utility function to store in the receivingClient object the information about the 
+ * requestingClient istance
+ */
+void TcpServer::storeRequestingInfo(Client &receivingClient,Client &requestingClient) {
+    receivingClient.setChattingClientInfo(requestingClient.getIp(),requestingClient.getFileDescriptor());
+}
+
+
+/**
+ * Return the client istance to whom send the request. If client is not logged or not connected,
+ * return the requesting client itself
+ */
+Client TcpServer::sendRequest(Client &client, string message) {
+    string requestingName = client.getClientName();
+    char *pointer = strtok((char*)message.c_str()," ");
+
+    pointer = strtok(NULL," ");
+    // Now pointer contains the name of the answerer
+    for (auto&s : m_clients) {
+        if (strcmp(s.getClientName().c_str(),pointer)==0) {
+            // Found answerer
+            // Create message and send response
+            return s;
+        }
+    }
+    // if no client found, then answered is not connected or maybe still not logged
+    return client;
+}
+
+
+/**
+ * Login function: memorize client name and send back an OK ack in order to manage list of connected clients
+ */
+string TcpServer::loginClient(Client &client, string message) {
+    char *pointer = strtok((char*)message.c_str()," ");
+    
+    pointer = strtok(NULL," ");
+    // Now pointer should contain the username
+    // username could be tainted, pay attention
+    // check before if username has already been taken
+    // checkUsername
+
+    client.setClientName(pointer);
+
+    string response = "Login successful, welcome to the chatting platform!";
+    return response;
+}
+
 
 /**
  * Concatenate each client's connected name into a string, to form a dummy list to 
@@ -232,43 +282,97 @@ string TcpServer::createList(Client &client, string message) {
 
 
 /**
+ * Utility function: used to recover, from the receiving client, the instance of the requesting client
+ * inside the list of connected client. If client is found, the instance is returned. If client is not found, 
+ * (because e.g. of a disconnection) the receiving client istance itself is returned.
+ */
+Client TcpServer::getClient(Client &client) {
+    string chattinIp = client.getChattingClientIp();
+    int chattinSocket = client.getChattingClientSocket();
+
+    for (auto&s : m_clients) {
+        if (s.getIp() == chattinIp && s.getFileDescriptor() == chattinSocket) return s;
+    }
+    return client;
+}
+
+
+/**
  * Util function used by server to dispatch the client request. Need to be implemented
  */
-void TcpServer::processRequest(Client &client,encdecMsg decryptedMessage) {
-    string request = decryptedMessage.msg;
+void TcpServer::processRequest(Client &client,string decryptedMessage) {
+    string request = decryptedMessage;
     
     pipe_ret_t ret;
 
-    if (strncmp(request.c_str(),":LIST",5)) {
-        if (!client.isConnected()) {
-            // Cannot start normal flow until a login is provided
-            // loginRequired(client);
+    if (strncmp(request.c_str(),":LIST",5) == 0) {
+        if (!client.isAuthenticated()) {
+            // Cannot start normal flow until authentication is estabilished
         }
         string clientsList = createList(client,request);
         ret = sendToClient(client,clientsList.c_str(),strlen(clientsList.c_str()));
     }
-    else if (strncmp(request.c_str(),":REQ",4)) {
+    else if (strncmp(request.c_str(),":REQ",4) == 0) {
         if (!client.isConnected()) {
             // Cannot start a request-to-talk until a login is provided
+        }
+        if (!client.isAuthenticated()) {
+            // Cannot start normal flow until authentication is estabilished
         }
         if (client.isChatting()) {
             // Cannot instantiate a Request to Talk if are already talking
         }
-    }
-    else if (strncmp(request.c_str(),":LOGIN",6)) {
-        if (!client.isConnected()) {
-            // Cannot start normal flow until a login is provided
+
+        Client receivingClient = sendRequest(client,request);
+        if (receivingClient == client) {
+            // Client is not connected or not logged
+            string response = "Client not connected or not logged";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
         }
-        // A must function: each client after authentication must furnish a login name
-    }
-    else if (strncmp(request.c_str(),":TALK",5)) {
-        if (!client.isConnected()) {
-            // Cannot start normal flow until a login is provided
+        else {
+            // Client is connected: send message
+            string response = "Request-to-talk from " + client.getClientName() + "; Do you want to accept?";
+            storeRequestingInfo(receivingClient,client);
+            ret = sendToClient(receivingClient,response.c_str(),strlen(response.c_str()));
         }
-        // A must function: each client after authentication must furnish a login name
+    }
+    else if (strncmp(request.c_str(),":LOGIN",6) == 0) {
+        if (!client.isAuthenticated()) {
+            // Cannot start normal flow until authentication is estabilished
+        }
+        // A must function: each client must furnish a login name
+        string response = loginClient(client,request);
+        ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+    }
+    else if (strncmp(request.c_str(),":ACCEPT",7) ==0 ) {
+        // Recover the requesting client from the receiver client istance, and forward the ACCEPT message
+        Client requestingClient = getClient(client);
+        if (requestingClient == client) {
+            // The requesting client probably disconnected
+            string response = "The requesting client is disconnected";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        }
+        else {
+            // Simply forward the ":ACCEPT to the requesting client"  
+            ret = sendToClient(requestingClient,request.c_str(),strlen(request.c_str()));
+        }
+    }
+    else if (strncmp(request.c_str(),":DENY",5) ==0 ) {
+        // Recover the requesting client from the receiver client istance, and forward the DENY message
+        Client requestingClient = getClient(client);
+        if (requestingClient == client) {
+            // The requesting client probably disconnected
+            string response = "The requesting client is disconnected";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        }
+        else {
+            // Simply forward the ":DENY to the requesting client"
+            ret = sendToClient(requestingClient,request.c_str(),strlen(request.c_str()));
+        }
     }
     else {
-
+        string response = "Message format not recognized, type :HELP to get more information";
+        ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
     }
 }
 

@@ -72,10 +72,22 @@ public:
     bool deleteClient(Client & client);
 
     //
+    Client getClient(Client &client);
+
+    //
+    void storeRequestingInfo(Client &receivingClient, Client &requestingClient);
+
+    //
+    Client sendRequest(Client &client, std::string message);
+
+    //
+    string loginClient(Client &client, std::string message);
+
+    //
     string createList(Client &client, std::string message);
 
     //
-    void processRequest(Client &client,encdecMsg decryptedMessage);
+    void processRequest(Client &client,std::string decryptedMessage);
 
     // Add or remove eventually new observers
     void subscribe(const server_observer_t & observer);

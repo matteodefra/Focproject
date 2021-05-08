@@ -17,9 +17,9 @@ private:
     std::string m_errorMsg = "";
     std::string m_name = "";
 
-    // Istance of the chatting client (to allow forwarding)
+    // Istance of the requesting client (to allow forwarding)
     std::string ipChattingClient;
-    std::string usernameChattingClient;
+    int socketChattingClient;
 
     // Public key instance of client (stored a priori)
 
@@ -28,7 +28,6 @@ private:
      *  in the beginning
      */
     // EVP_PKEY* serverClientSymmetricKey;
-
 
     // Monitor online status of client
     bool m_isConnected;
@@ -77,8 +76,17 @@ public:
     void setServerClientSharedKey();
     // EVP_PKEY* getServerClientSharedSecret() {return serverClientSymmetricKey;}
 
-    void setClientName(const std::string & name) { m_name = name; }
+    void setClientName(const std::string & name) { m_name.erase(m_name.begin(),m_name.end()); m_name = name; }
     std::string getClientName() const { return m_name; }
+
+    void setChattingClientInfo(const std::string & ip,int socket) { 
+        ipChattingClient.erase(ipChattingClient.begin(),ipChattingClient.end()); 
+        ipChattingClient = ip; 
+        socketChattingClient = socket;    
+    }
+    std::string getChattingClientIp() const { return ipChattingClient; }
+    int getChattingClientSocket() const { return socketChattingClient; }
+
 
     void setThreadHandler(std::function<void(void)> func) { m_threadHandler = new std::thread(func);}
 

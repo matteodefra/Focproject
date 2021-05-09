@@ -84,6 +84,9 @@ public:
     string loginClient(Client &client, std::string message);
 
     //
+    string regClient(Client &client, std::string message);
+    
+    //
     string createList(Client &client, std::string message);
 
     //

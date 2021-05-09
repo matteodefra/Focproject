@@ -8,6 +8,10 @@
 
 using namespace std;
 
+/**
+ *  Help message printed after the command :HELP
+ */
+
 void helpMsg(){
     cout<<"********************************************************************"<<endl;
     cout<<"LIST OF AVAILABLE COMMANDS:"<<endl;
@@ -15,25 +19,84 @@ void helpMsg(){
     cout<<":REQ x -> send a request to talk to the client with username x"<<endl;
     cout<<":LOGIN -> log in to the service"<<endl;
     cout<<"********************************************************************"<<endl;
-    cout<<endl;
 }
 
+/**
+ * This function take a :REG or :LOGIN msg and create and hash for the password
+ * return the digest generated
+ */
+
+unsigned char* TcpClient::pswHash(string msg){
+
+    char *pointer = strtok((char*)msg.c_str()," ");
+    vector<string> credentials; //at.() = username | at.(1) = password
+    int counter = 0; //used to skip :LOGIN/:REG part
+
+    while (pointer != NULL) { //putting the credentials into vector
+        if(counter != 0) credentials.push_back(pointer);
+        pointer = strtok(NULL," "); 
+        counter++;
+    }
+
+    char* c_msg =(char*)credentials.at(1).c_str();
+    const EVP_MD* hash_function = EVP_sha256();
+    unsigned int digest_len;
+
+    unsigned char* digest = (unsigned char*)malloc(EVP_MD_size(hash_function));
+
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EVP_DigestInit(ctx,hash_function);
+    EVP_DigestUpdate(ctx,(unsigned char*)c_msg,strlen(c_msg));
+    EVP_DigestFinal(ctx,digest,&digest_len);
+
+    cout<<"HASH:"<<endl;
+    BIO_dump_fp(stdout,(char*)digest,strlen((char*)digest));
+
+    EVP_MD_CTX_free(ctx);
+
+    return digest;
+}
+
+/**
+ *  Check if the command has been writed correctly
+ *  Returns 0 if the command has been recognize and not special actions are required
+ *  Returns -1 if the command is :HELP
+ *  Returns -2 if the command has not been recognized
+ *  Return   1 if the command is :LOGIN / :REG (require hashing of the psw)
+ * 
+ */
+
 int TcpClient::checkCommandValidity(string msg) { 
+
+    size_t num_blank = count(msg.begin(), msg.end(),' '); //count blankets
+
+    char *pointer = strtok((char*)msg.c_str()," ");
+    vector<string> words; 
+
+    while (pointer != NULL) {  //insert all the words of a command in this vector
+        words.push_back(pointer);
+        pointer = strtok(NULL," ");
+    }
  
-    if(msg.compare(":LIST")==0 || msg.compare(":LOGIN")==0) {
+    if(words.size() == 0) return -2;
+
+    if(words.at(0).compare(":LIST")==0 && words.size() == 1 && num_blank == 0) { 
         return 0;
     }
-    else if(msg.compare(":HELP")==0) {
+    else if(words.at(0).compare(":HELP")==0 && words.size() == 1 && num_blank == 0) {
         helpMsg(); 
         return -1;
     } 
-    else if(msg.rfind(":REQ ", 0) == 0 ){
-        size_t num_blank = count(msg.begin(), msg.end(),' ');
-        if(num_blank>1 || msg.length() < 6) return -2;
-            else return 0;
+    else if(words.at(0).compare(":REQ") == 0 && words.size() == 2 && num_blank == 1){ //:REQ username
+        return 0;
+    }
+    else if(words.at(0).compare(":LOGIN") == 0 && words.size() == 3 && num_blank == 2){ //:LOGIN username psw 
+        return 1;
+    }
+    else if(words.at(0).compare(":REG") == 0 && words.size() == 3 && num_blank == 2){ ///:REG username psw
+        return 1;
     }
      else return -2;
- 
 }
  
 
@@ -135,7 +198,7 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
 
 
     while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
-        cout << "Entra nel loop?" << endl;
+        //cout << "Entra nel loop?" << endl;
         if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
             std::cout<<"Error in performing encryption"<<std::endl;
             handleErrors();
@@ -338,7 +401,7 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
 
     // Needed for comparison between size_t and integer
     while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
-        cout << "Entra nel loop?" << endl;
+        //cout << "Entra nel loop?" << endl;
         if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
             std::cout<<"Error in performing encryption"<<std::endl;
             handleErrors();
@@ -426,15 +489,17 @@ void TcpClient::ReceiveTask() {
             memcpy(tag, msg+pos, tag_len);
             pos += tag_len;
 
-            unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len);
+            unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
 
             // Decrypt received message with AES-128 bit GCM
             int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
+            plaintext_buffer[encrypted_len] = '\0';
             
             cout << "Client, message decrypted: " << plaintext_buffer << endl;
 
             // Based on message received, we need to perform some action
             publishServerMsg((char*)plaintext_buffer,decrypted_len);
+            free(plaintext_buffer);
         }
     }
 }

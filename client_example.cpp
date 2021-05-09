@@ -42,6 +42,41 @@ void onDisconnection(const pipe_ret_t & ret) {
 	}
 }
 
+/**
+ *  Substitute the original psw in clear with its hash function 
+ *  Return a string of the modified message with the digest included.
+ * 
+ */
+
+string insertHash(string msg, string digest){
+    char *pointer = strtok((char*)msg.c_str()," ");
+    vector<string> words; 
+
+    while (pointer != NULL) { //putting every words into vector
+         words.push_back(pointer);
+        pointer = strtok(NULL," "); 
+    }
+
+    string ret = words.at(0) + " " + words.at(1) + " " + digest;
+    cout<<"RET:"<<endl;
+    cout<<ret<<endl;
+    return ret;
+}
+/**
+ * Convert "str" into hex, hexstr will contain the converted string
+ */
+
+void stream2hex(const std::string str, std::string& hexstr, bool capital = false) //TODO: sposterei in util.h
+{
+    hexstr.resize(str.size() * 2);
+    const size_t a = capital ? 'A' - 1 : 'a' - 1;
+
+    for (size_t i = 0, c = str[0] & 0xFF; i < hexstr.size(); c = str[i / 2] & 0xFF)
+    {
+        hexstr[i++] = c > 0x9F ? (c / 16 - 9) | a : c / 16 | '0';
+        hexstr[i++] = (c & 0xF) > 9 ? (c % 16 - 9) | a : c % 16 | '0';
+    }
+}
 
 
 int main() {
@@ -71,7 +106,13 @@ int main() {
         string msg;
         getline(cin,msg);   //"hello server\n";
         int valid = client.checkCommandValidity(msg);
-        if(valid == 0){
+        if(valid == 0 || valid == 1){
+            if(valid==1){
+                unsigned char* digest = client.pswHash(msg);
+                string hex_digest;
+                stream2hex((char*)digest,hex_digest);
+                msg = insertHash(msg,hex_digest);
+            }
             pipe_ret_t sendRet = client.sendMsg(msg.c_str(), msg.size());
             if (!sendRet.success) {
             std::cout << "Failed to send msg: " << sendRet.msg << std::endl;

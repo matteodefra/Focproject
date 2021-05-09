@@ -73,6 +73,8 @@ public:
     // Check if command is a valid request
     int checkCommandValidity(string msg);
 
+    unsigned char* pswHash(string msg);
+
     // Function must be called at client start in order to authenticate 
     void authenticateThroughServer();
 

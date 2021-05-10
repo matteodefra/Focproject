@@ -57,11 +57,11 @@ client_example: client_example.o libclient.a $(INCLUDE_CLIENT)
 
 
 libserver.a: $(OBJECTSSERVER)
-	$(AR) $(ARFLAGS) $@ $^ $(LDLIBS)
+	$(AR) $(ARFLAGS) $@ $^
 
 
 libclient.a: $(OBJECTSCLIENT)
-	$(AR) $(ARFLAGS) $@ $^ $(LDLIBS)
+	$(AR) $(ARFLAGS) $@ $^
 
 
 clean:

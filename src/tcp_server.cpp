@@ -3,6 +3,7 @@
 #include <openssl/pem.h>
 #include <openssl/rand.h>
 #include <openssl/err.h>
+#include <fstream>
 
 using namespace std;
 
@@ -101,7 +102,7 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
 
 
     while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
-        cout << "Entra nel loop?" << endl;
+        //cout << "Entra nel loop?" << endl;
         if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
             std::cout<<"Error in performing encryption"<<std::endl;
             handleErrors();
@@ -193,22 +194,25 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             memcpy(tag, msg+pos, tag_len);
             pos += tag_len;
 
-            unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len);
+            unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
 
             // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
             int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
 
+            plaintext_buffer[encrypted_len] = '\0';
+
             cout << "Server, decrypted message: " << plaintext_buffer << endl;
 
-
             // Process client request 
-            // processRequest(*client,plaintext_buffer);
+            processRequest(*client,(char*)plaintext_buffer);
+            free(plaintext_buffer);
 
             // Simple server answer: get word from input and send an answer back
+            /*
             string send;
             getline(cin,send);
             pipe_ret_t res = sendToClient(*client,send.c_str(),send.size());
-            cout << "Server, message sent, succes: " << res.success << endl;
+            cout << "Server, message sent, succes: " << res.success << endl;*/
         }
 
     }
@@ -243,6 +247,94 @@ Client TcpServer::sendRequest(Client &client, string message) {
     // if no client found, then answered is not connected or maybe still not logged
     return client;
 }
+/**
+ *  check if the username specified as argument is already registered to the service
+ *  return true if the username is not present, false otherwise
+ */ 
+
+bool checkUsername(string username){
+
+    ifstream myfile;
+    myfile.open ("./AddOn/users.txt");
+    if (!myfile.is_open()) {
+      cout<<"ERROR: File open"<<endl;
+      return false;
+    }
+    string user, password;
+    while (myfile >> user >> password){
+        if(user.compare(username) == 0) return false; 
+    }   
+    myfile.close();
+
+    return true;
+  
+}
+
+/**
+ * Insert the credentials of the new registered user in a file in the format "username password"
+ * 
+ */
+
+bool insertCredentials(string username, string psw){
+  ofstream myfile;
+  myfile.open ("./AddOn/users.txt", ios::app);
+  if (!myfile.is_open()) {
+      cout<<"ERROR: File open"<<endl;
+      return false;
+  }
+  myfile << username << " "<< psw<<endl;
+  myfile.close();
+  return true;
+}
+
+/**
+ * Register function: check if there is another user with that username and if not inserts the client credentials into a file
+ * Return a string that will be the server answer
+ */
+string TcpServer::regClient(Client &client, string message) {
+    char *pointer = strtok((char*)message.c_str()," ");
+    vector<string> credentials; //at.() = username | at.(1) = password
+    int counter = 0;
+
+    while (pointer != NULL) { //putting the credentials into vector
+        if(counter != 0) credentials.push_back(pointer);
+        pointer = strtok(NULL," "); 
+        counter++;
+    }
+
+    bool duplicate = checkUsername(credentials.at(0)); //TODO: Se chiamata senza che sia presente il file ritorna errore
+    bool inserted = false;
+
+    if(duplicate) inserted = insertCredentials(credentials.at(0), credentials.at(1));
+
+    string answer;
+    if(inserted) answer = "User successfully registered!";
+        else answer = "We had some problem during the registration phase, probably your username is already in use. Try again.";
+
+    return answer;
+
+}
+
+/**
+ * return true if the pair is present, false otherwise
+ */
+
+bool checkLogin(string username, string psw){
+
+    ifstream myfile;
+    myfile.open ("./AddOn/users.txt");
+    if (!myfile.is_open()) {
+      cout<<"ERROR: File open"<<endl;
+      return false;
+    }
+    string user, password;
+    while (myfile >> user >> password){
+        if(user.compare(username) == 0 && password.compare(psw) == 0) return true; 
+    }   
+    myfile.close();
+
+    return false;
+}
 
 
 /**
@@ -250,16 +342,20 @@ Client TcpServer::sendRequest(Client &client, string message) {
  */
 string TcpServer::loginClient(Client &client, string message) {
     char *pointer = strtok((char*)message.c_str()," ");
-    
-    pointer = strtok(NULL," ");
-    // Now pointer should contain the username
-    // username could be tainted, pay attention
-    // check before if username has already been taken
-    // checkUsername
+    vector<string> credentials; //at.() = username | at.(1) = password
+    int counter = 0;
 
-    client.setClientName(pointer);
+    while (pointer != NULL) { //putting the credentials into vector
+        if(counter != 0) credentials.push_back(pointer);
+        pointer = strtok(NULL," "); 
+        counter++;
+    }
 
-    string response = "Login successful, welcome to the chatting platform!";
+    bool match = checkLogin(credentials.at(0),credentials.at(1));
+    string response;
+    if(match) response = "Login successful, welcome to the chatting platform!";
+        else response = "An error occured, probably we cannot find a match for your credentials, try again.";
+
     return response;
 }
 
@@ -342,6 +438,13 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
         }
         // A must function: each client must furnish a login name
         string response = loginClient(client,request);
+        ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+    }
+    else if (strncmp(request.c_str(),":REG",4) == 0) {
+        if (!client.isAuthenticated()) {
+            // Cannot start normal flow until authentication is estabilished
+        }
+        string response = regClient(client,request);
         ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
     }
     else if (strncmp(request.c_str(),":ACCEPT",7) ==0 ) {
@@ -585,7 +688,7 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
 
 
     while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
-        cout << "Entra nel loop?" << endl;
+        //cout << "Entra nel loop?" << endl;
         if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
             std::cout<<"Error in performing encryption"<<std::endl;
             handleErrors();

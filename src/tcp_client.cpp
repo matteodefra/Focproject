@@ -5,6 +5,7 @@
 #include <openssl/pem.h>
 #include <openssl/rand.h>
 #include <openssl/err.h>
+#include <assert.h>
 
 using namespace std;
 
@@ -19,6 +20,65 @@ void helpMsg(){
     cout<<":REQ x -> send a request to talk to the client with username x"<<endl;
     cout<<":LOGIN -> log in to the service"<<endl;
     cout<<"********************************************************************"<<endl;
+}
+
+/**
+ * Utility function to handle OPENSSL errors
+ */
+void handleErrors(void)
+{
+    ERR_print_errors_fp(stderr);
+    abort();
+}
+
+
+
+unsigned char *pem_serialize_pubkey(EVP_PKEY *key, size_t *len)
+{
+	assert(key && len);
+	BIO *bio = BIO_new(BIO_s_mem());
+	if (!bio) {
+		handleErrors();
+		return NULL;
+	}
+	if (PEM_write_bio_PUBKEY(bio, key) != 1) {
+		handleErrors();
+		BIO_free(bio);
+		return NULL;
+	}
+	char *buf;
+	*len = BIO_get_mem_data(bio, &buf);
+	if (*len <= 0 || !buf) {
+		handleErrors();
+		BIO_free(bio);
+		return NULL;
+	}
+	unsigned char *pubkey = (unsigned char*)malloc(*len);
+	if (!pubkey)
+		handleErrors();
+	memcpy(pubkey, buf, *len);
+	BIO_free(bio);
+	return pubkey;
+}
+
+EVP_PKEY *pem_deserialize_pubkey(unsigned char *key, size_t len)
+{
+	assert(key);
+	BIO *bio = BIO_new(BIO_s_mem());
+	if (!bio) {
+		handleErrors();
+		return NULL;
+	}
+	if (BIO_write(bio, key, len) != (int)len) {
+		handleErrors();
+		BIO_free(bio);
+		return NULL;
+	}
+	EVP_PKEY *pubkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+	if (!pubkey)
+		handleErrors();
+	BIO_free(bio);
+	return pubkey;
 }
 
 /**
@@ -96,6 +156,9 @@ int TcpClient::checkCommandValidity(string msg) {
     else if(words.at(0).compare(":REG") == 0 && words.size() == 3 && num_blank == 2){ ///:REG username psw
         return 1;
     }
+    else if(words.at(0).compare(":ACCEPT") == 0 && words.size() == 1 && num_blank == 0){ ///:REG username psw
+        return 0;
+    }
      else return -2;
 }
  
@@ -145,14 +208,6 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
     return ret;
 }
 
-/**
- * Utility function to handle OPENSSL errors
- */
-void handleErrors(void)
-{
-    ERR_print_errors_fp(stderr);
-    abort();
-}
 
 /**
  * gcm_encrypt: encrypt a message in aes-128 gcm mode
@@ -231,6 +286,20 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
 }
 
 
+void TcpClient::saveMyKey() {
+    string name = getClientName();
+
+    // Save into local variable the client private key.
+    // The file is stored into ./AddOn/<client_name>/<client_name>
+    string path = "./AddOn/" + name + "/" + name + ".pem"; 
+    FILE *file = fopen(path.c_str(),"r");
+    if (!file) handleErrors();
+
+    mykey = PEM_read_PrivateKey(file,NULL,NULL,NULL);
+    if (!mykey) handleErrors(); 
+}
+
+
 /**
  * Allow a client to send a message to the server. The first setting + encryption call could also be inserted 
  * directly in a utility function, returning the buffer variable since it is the final value we need
@@ -238,65 +307,169 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
 pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) { 
     pipe_ret_t ret;
 
-    // Also this section could be moved in an utility function
-    unsigned char msg2[size];
-    strcpy((char*)msg2,msg);
+    if (getChatting()) {
+        // Derive the shared secret
+        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey, NULL);
+        EVP_PKEY_derive_init(ctx_drv);
+        if (1 != EVP_PKEY_derive_set_peer(ctx_drv, peerKey)) {
+            handleErrors();
+        }
+        unsigned char* secret;
 
-    unsigned char key_gcm[] = "1234567890123456";
-    unsigned char iv_gcm[] = "123456780912";
-    unsigned char *cphr_buf;
-    unsigned char *tag_buf;
-    int cphr_len;
-    int tag_len;
-    int pt_len = strlen(msg);
+        /* Retrieving shared secret’s length */
+        size_t secretlen;
+        if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
+            handleErrors();
+        }
+        /* Deriving shared secret */
+        secret = (unsigned char*)malloc(secretlen);
+        if (secret == NULL) {
+            handleErrors();
+        }
+        if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
+            handleErrors();
+        }
+        EVP_PKEY_CTX_free(ctx_drv);
 
-    cphr_buf = (unsigned char*)malloc(size);
-    tag_buf = (unsigned char*)malloc(16);
-    cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key_gcm,iv_gcm,12,cphr_buf,tag_buf);
+        // Get first 16 bytes of shared secret, to use as key in AES
+        unsigned char *key = (unsigned char*)malloc(16);
+        for (int i =0; i<16; i++) {
+            key[i] = secret[i];
+        }
 
-    auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
+        // Also this section could be moved in an utility function
+        unsigned char msg2[size];
+        strcpy((char*)msg2,msg);
 
-    int pos = 0;
-  
-    // copy iv
-    memcpy(buffer+pos, iv_gcm, 12);
-    pos += 12;
-    // delete [] iv_gcm;
+        unsigned char iv_gcm[] = "123456780912";
+        unsigned char *cphr_buf;
+        unsigned char *tag_buf;
+        int cphr_len;
+        int tag_len;
+        int pt_len = strlen(msg);
 
-    // copy aad
-    memcpy((buffer+pos), iv_gcm, 12);
-    pos += 12;
+        cphr_buf = (unsigned char*)malloc(size);
+        tag_buf = (unsigned char*)malloc(16);
+        cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key,iv_gcm,12,cphr_buf,tag_buf);
 
-    // copy encrypted data
-    memcpy((buffer+pos), cphr_buf, cphr_len);
-    pos += pt_len;
-    delete[] cphr_buf;
+        auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
 
-    // copy tag
-    memcpy((buffer+pos), tag_buf, 16);
-    pos += 16;
-    delete [] tag_buf;
+        int pos = 0;
+    
+        // copy iv
+        memcpy(buffer+pos, iv_gcm, 12);
+        pos += 12;
+        // delete [] iv_gcm;
 
-    cout << "Client, dumping the encrypted payload: " << endl;
-    BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
-    cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
+        // copy aad
+        memcpy((buffer+pos), iv_gcm, 12);
+        pos += 12;
 
-    // Change name accordingly
-    int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
-    if (numBytesSent < 0 ) { // send failed
-        ret.success = false;
-        ret.msg = strerror(errno);
+        // copy encrypted data
+        memcpy((buffer+pos), cphr_buf, cphr_len);
+        pos += pt_len;
+        delete[] cphr_buf;
+
+        // copy tag
+        memcpy((buffer+pos), tag_buf, 16);
+        pos += 16;
+        delete [] tag_buf;
+
+        cout << "Client, dumping the encrypted payload: " << endl;
+        BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
+        cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
+
+        // Change name accordingly
+        int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
+        if (numBytesSent < 0 ) { // send failed
+            ret.success = false;
+            ret.msg = strerror(errno);
+            return ret;
+        }
+        if ((uint)numBytesSent < size) { // not all bytes were sent
+            ret.success = false;
+            char msg[100];
+            sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
+            ret.msg = msg;
+            return ret;
+        }
+        ret.success = true;
+        return ret;
+
+    }
+ 
+    else {
+
+        // Workaround now to save client name and client public key
+        if (strncmp(msg,":LOGIN",6) == 0) {
+            char *copy = (char*) malloc(size);
+            strcpy(copy,msg);
+            char *pointer = strtok(copy," ");
+            pointer = strtok(NULL, " ");
+            setClientName(pointer);
+            saveMyKey();
+        }
+
+        // Also this section could be moved in an utility function
+        unsigned char msg2[size];
+        strcpy((char*)msg2,msg);
+
+        unsigned char key_gcm[] = "1234567890123456";
+        unsigned char iv_gcm[] = "123456780912";
+        unsigned char *cphr_buf;
+        unsigned char *tag_buf;
+        int cphr_len;
+        int tag_len;
+        int pt_len = strlen(msg);
+
+        cphr_buf = (unsigned char*)malloc(size);
+        tag_buf = (unsigned char*)malloc(16);
+        cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key_gcm,iv_gcm,12,cphr_buf,tag_buf);
+
+        auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
+
+        int pos = 0;
+    
+        // copy iv
+        memcpy(buffer+pos, iv_gcm, 12);
+        pos += 12;
+        // delete [] iv_gcm;
+
+        // copy aad
+        memcpy((buffer+pos), iv_gcm, 12);
+        pos += 12;
+
+        // copy encrypted data
+        memcpy((buffer+pos), cphr_buf, cphr_len);
+        pos += pt_len;
+        delete[] cphr_buf;
+
+        // copy tag
+        memcpy((buffer+pos), tag_buf, 16);
+        pos += 16;
+        delete [] tag_buf;
+
+        cout << "Client, dumping the encrypted payload: " << endl;
+        BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
+        cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
+
+        // Change name accordingly
+        int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
+        if (numBytesSent < 0 ) { // send failed
+            ret.success = false;
+            ret.msg = strerror(errno);
+            return ret;
+        }
+        if ((uint)numBytesSent < size) { // not all bytes were sent
+            ret.success = false;
+            char msg[100];
+            sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
+            ret.msg = msg;
+            return ret;
+        }
+        ret.success = true;
         return ret;
     }
-    if ((uint)numBytesSent < size) { // not all bytes were sent
-        ret.success = false;
-        char msg[100];
-        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
-        ret.msg = msg;
-        return ret;
-    }
-    ret.success = true;
-    return ret;
 }
 
 void TcpClient::subscribe(const client_observer_t & observer) {
@@ -460,47 +633,152 @@ void TcpClient::ReceiveTask() {
             finish();
             break;
         } else {
-            // Also this part could be included in a utility function returning only the decrypted message
 
-            cout << "Client: start decryption process..." << endl;
+            if (getChatting()) {
+                // Derive the shared secret
+                EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey, NULL);
+                EVP_PKEY_derive_init(ctx_drv);
+                if (1 != EVP_PKEY_derive_set_peer(ctx_drv, peerKey)) {
+                    handleErrors();
+                }
+                unsigned char* secret;
 
-            unsigned char key_gcm[] = "1234567890123456";
+                /* Retrieving shared secret’s length */
+                size_t secretlen;
+                if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
+                    handleErrors();
+                }
+                /* Deriving shared secret */
+                secret = (unsigned char*)malloc(secretlen);
+                if (secret == NULL) {
+                    handleErrors();
+                }
+                if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
+                    handleErrors();
+                }
+                EVP_PKEY_CTX_free(ctx_drv);
 
-            int pos = 0;
-            // retrieve IV
-            unsigned char iv_gcm[12];
-            memcpy(iv_gcm,msg+pos,12);
-            pos += 12;
+                // Get first 16 bytes of shared secret, to use as key in AES
+                unsigned char *key = (unsigned char*)malloc(16);
+                for (int i =0; i<16; i++) {
+                    key[i] = secret[i];
+                }
 
-            // retrieve AAD
-            unsigned char AAD[12];
-            memcpy(AAD, msg+pos,12);
-            pos += 12;
+                int pos = 0;
+                // retrieve IV
+                unsigned char iv_gcm[12];
+                memcpy(iv_gcm,msg+pos,12);
+                pos += 12;
 
-            // retrieve encrypted data
-            size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
-            unsigned char encryptedData[encrypted_len];
-            memcpy(encryptedData,msg+pos,encrypted_len);
-            pos += encrypted_len;
+                // retrieve AAD
+                unsigned char AAD[12];
+                memcpy(AAD, msg+pos,12);
+                pos += 12;
 
-            // retrieve tag
-            size_t tag_len = 16;
-            unsigned char tag[tag_len];
-            memcpy(tag, msg+pos, tag_len);
-            pos += tag_len;
+                // retrieve encrypted data
+                size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
+                unsigned char encryptedData[encrypted_len];
+                memcpy(encryptedData,msg+pos,encrypted_len);
+                pos += encrypted_len;
 
-            unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
+                // retrieve tag
+                size_t tag_len = 16;
+                unsigned char tag[tag_len];
+                memcpy(tag, msg+pos, tag_len);
+                pos += tag_len;
 
-            // Decrypt received message with AES-128 bit GCM
-            int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
-            plaintext_buffer[encrypted_len] = '\0';
-            
-            cout << "Client, message decrypted: " << plaintext_buffer << endl;
+                unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
 
-            // Based on message received, we need to perform some action
-            publishServerMsg((char*)plaintext_buffer,decrypted_len);
-            free(plaintext_buffer);
+                // Decrypt received message with AES-128 bit GCM
+                int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,12,plaintext_buffer);
+                plaintext_buffer[encrypted_len] = '\0';
+                
+                cout << "Client, message decrypted: " << plaintext_buffer << endl;
+
+                // Based on message received, we need to perform some action
+                processRequest(plaintext_buffer);
+                free(plaintext_buffer);
+            }
+
+            else {
+                // Also this part could be included in a utility function returning only the decrypted message
+
+                cout << "Client: start decryption process..." << endl;
+
+                unsigned char key_gcm[] = "1234567890123456";
+
+                int pos = 0;
+                // retrieve IV
+                unsigned char iv_gcm[12];
+                memcpy(iv_gcm,msg+pos,12);
+                pos += 12;
+
+                // retrieve AAD
+                unsigned char AAD[12];
+                memcpy(AAD, msg+pos,12);
+                pos += 12;
+
+                // retrieve encrypted data
+                size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
+                unsigned char encryptedData[encrypted_len];
+                memcpy(encryptedData,msg+pos,encrypted_len);
+                pos += encrypted_len;
+
+                // retrieve tag
+                size_t tag_len = 16;
+                unsigned char tag[tag_len];
+                memcpy(tag, msg+pos, tag_len);
+                pos += tag_len;
+
+                unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
+
+                // Decrypt received message with AES-128 bit GCM
+                int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
+                plaintext_buffer[encrypted_len] = '\0';
+                
+                cout << "Client, message decrypted: " << plaintext_buffer << endl;
+
+                // Based on message received, we need to perform some action
+                processRequest(plaintext_buffer);
+                free(plaintext_buffer);
+            }
         }
+    }
+}
+
+
+void TcpClient::setAndStorePeerKey(unsigned char* key) {
+    // Set peerkey istance inside TcpClient
+    peerKey = pem_deserialize_pubkey(key,strlen((char*)key));
+
+    // Save key into file. The peer public key is saved into folder
+    // AddOn/<client_name>/peer.pem
+    // string path = "./AddOn/" + clientName + "/peer.pem";
+    // FILE *file = fopen(path.c_str(),"w");
+    // if (!file) {
+    //     handleErrors();
+    // }
+
+    // int res = PEM_write_PUBKEY(file,peerKey);
+    // if (!res) {
+    //     handleErrors();
+    // }
+}
+
+void TcpClient::processRequest(unsigned char* plaintext_buffer) {
+    char *message = (char*)plaintext_buffer;
+
+    if (strncmp(message,":KEY",4) == 0) {
+        setChatting();
+
+        // Move pointer to key
+        unsigned char *key = (unsigned char*)plaintext_buffer + 5;
+
+        // When a key message arrives, save the key into tcpclient object
+        setAndStorePeerKey(key);
+    }
+    else {
+        publishServerMsg(message,strlen(message));
     }
 }
 

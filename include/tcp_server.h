@@ -51,8 +51,8 @@ private:
 
     // Some server function to print client messages, client disconnection
     // and the receive task (the spawning thread)
-    void publishClientMsg(const Client & client, const char * msg, size_t msgSize);
-    void publishClientDisconnected(const Client & client);
+    void publishClientMsg(Client & client, const char * msg, size_t msgSize);
+    void publishClientDisconnected(Client & client);
     void receiveTask(/*void * context*/);
 
 
@@ -72,13 +72,13 @@ public:
     bool deleteClient(Client & client);
 
     //
-    Client getClient(Client &client);
+    Client& getClient(Client &client);
 
     //
     void storeRequestingInfo(Client &receivingClient, Client &requestingClient);
 
     //
-    Client sendRequest(Client &client, std::string message);
+    Client& sendRequest(Client &client, std::string message);
 
     //
     string loginClient(Client &client, std::string message);
@@ -102,7 +102,7 @@ public:
      * finish() will close the server and free clients resources
      */
     pipe_ret_t sendToAllClients(const char * msg, size_t size);
-    pipe_ret_t sendToClient(const Client & client, const char * msg, size_t size);
+    pipe_ret_t sendToClient(Client & client, const char * msg, size_t size);
     pipe_ret_t finish();
     void printClients();
 };

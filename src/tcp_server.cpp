@@ -4,6 +4,7 @@
 #include <openssl/rand.h>
 #include <openssl/err.h>
 #include <fstream>
+#include <assert.h>
 
 using namespace std;
 
@@ -56,6 +57,54 @@ void handleErrors(void)
     abort();
 }
 
+
+unsigned char *pem_serialize_pubkey(EVP_PKEY *key, size_t *len)
+{
+	assert(key && len);
+	BIO *bio = BIO_new(BIO_s_mem());
+	if (!bio) {
+		handleErrors();
+		return NULL;
+	}
+	if (PEM_write_bio_PUBKEY(bio, key) != 1) {
+		handleErrors();
+		BIO_free(bio);
+		return NULL;
+	}
+	char *buf;
+	*len = BIO_get_mem_data(bio, &buf);
+	if (*len <= 0 || !buf) {
+		handleErrors();
+		BIO_free(bio);
+		return NULL;
+	}
+	unsigned char *pubkey = (unsigned char*)malloc(*len);
+	if (!pubkey)
+		handleErrors();
+	memcpy(pubkey, buf, *len);
+	BIO_free(bio);
+	return pubkey;
+}
+
+EVP_PKEY *pem_deserialize_pubkey(unsigned char *key, size_t len)
+{
+	assert(key);
+	BIO *bio = BIO_new(BIO_s_mem());
+	if (!bio) {
+		handleErrors();
+		return NULL;
+	}
+	if (BIO_write(bio, key, len) != (int)len) {
+		handleErrors();
+		BIO_free(bio);
+		return NULL;
+	}
+	EVP_PKEY *pubkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+	if (!pubkey)
+		handleErrors();
+	BIO_free(bio);
+	return pubkey;
+}
 
 /**
  * Util function to decrypt server message
@@ -166,53 +215,58 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             deleteClient(*client);
             break;
         } else {
+
+            if (client->isChatting()) {
+                // Client send the message to the other party
+                // Get the client socket from the client istance and forward it
+                Client &receiver = getClient(*client);
+
+                sendToClient(receiver,msg,numOfBytesReceived);
+            }
         
-            cout << "Server, starting decryption settings..." << endl;
+            else {
+                cout << "Server, starting decryption settings..." << endl;
 
-            unsigned char key_gcm[] = "1234567890123456";
+                unsigned char key_gcm[] = "1234567890123456";
 
-            int pos = 0;
-            // retrieve IV
-            unsigned char iv_gcm[12];
-            memcpy(iv_gcm,msg+pos,12);
-            pos += 12;
+                int pos = 0;
+                // retrieve IV
+                unsigned char iv_gcm[12];
+                memcpy(iv_gcm,msg+pos,12);
+                pos += 12;
 
-            // retrieve AAD
-            unsigned char AAD[12];
-            memcpy(AAD, msg+pos,12);
-            pos += 12;
+                // retrieve AAD
+                unsigned char AAD[12];
+                memcpy(AAD, msg+pos,12);
+                pos += 12;
 
-            // retrieve encrypted data
-            size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
-            unsigned char encryptedData[encrypted_len];
-            memcpy(encryptedData,msg+pos,encrypted_len);
-            pos += encrypted_len;
+                // retrieve encrypted data
+                size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
+                unsigned char encryptedData[encrypted_len];
+                memcpy(encryptedData,msg+pos,encrypted_len);
+                pos += encrypted_len;
 
-            // retrieve tag
-            size_t tag_len = 16;
-            unsigned char tag[tag_len];
-            memcpy(tag, msg+pos, tag_len);
-            pos += tag_len;
+                // retrieve tag
+                size_t tag_len = 16;
+                unsigned char tag[tag_len];
+                memcpy(tag, msg+pos, tag_len);
+                pos += tag_len;
 
-            unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
+                unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
 
-            // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
-            int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
+                // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
+                int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
 
-            plaintext_buffer[encrypted_len] = '\0';
+                plaintext_buffer[encrypted_len] = '\0';
 
-            cout << "Server, decrypted message: " << plaintext_buffer << endl;
+                cout << "Server, decrypted message: " << plaintext_buffer << endl;
 
-            // Process client request 
-            processRequest(*client,(char*)plaintext_buffer);
-            free(plaintext_buffer);
+                // Process client request 
+                processRequest(*client,(char*)plaintext_buffer);
+                free(plaintext_buffer);
 
-            // Simple server answer: get word from input and send an answer back
-            /*
-            string send;
-            getline(cin,send);
-            pipe_ret_t res = sendToClient(*client,send.c_str(),send.size());
-            cout << "Server, message sent, succes: " << res.success << endl;*/
+            }
+            
         }
 
     }
@@ -231,7 +285,7 @@ void TcpServer::storeRequestingInfo(Client &receivingClient,Client &requestingCl
  * Return the client istance to whom send the request. If client is not logged or not connected,
  * return the requesting client itself
  */
-Client TcpServer::sendRequest(Client &client, string message) {
+Client& TcpServer::sendRequest(Client &client, string message) {
     string requestingName = client.getClientName();
     char *pointer = strtok((char*)message.c_str()," ");
 
@@ -356,6 +410,10 @@ string TcpServer::loginClient(Client &client, string message) {
     if(match) response = "Login successful, welcome to the chatting platform!";
         else response = "An error occured, probably we cannot find a match for your credentials, try again.";
 
+    if (match) {
+        client.setClientName(credentials.at(0));
+    }
+
     return response;
 }
 
@@ -382,7 +440,7 @@ string TcpServer::createList(Client &client, string message) {
  * inside the list of connected client. If client is found, the instance is returned. If client is not found, 
  * (because e.g. of a disconnection) the receiving client istance itself is returned.
  */
-Client TcpServer::getClient(Client &client) {
+Client& TcpServer::getClient(Client &client) {
     string chattinIp = client.getChattingClientIp();
     int chattinSocket = client.getChattingClientSocket();
 
@@ -390,6 +448,42 @@ Client TcpServer::getClient(Client &client) {
         if (s.getIp() == chattinIp && s.getFileDescriptor() == chattinSocket) return s;
     }
     return client;
+}
+
+
+/**
+ * Recover the public key of clientTwo and create message for clientOne
+ */
+unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
+
+    string clientName = clientTwo.getClientName();
+
+    string path = "./AddOn/" + clientName + "_pub.pem";
+
+    FILE *file = fopen(path.c_str(),"r");
+    if (!file) {
+        handleErrors();
+    }
+
+    EVP_PKEY *pubkey = PEM_read_PUBKEY(file,NULL,NULL,NULL);
+
+    size_t keylen;
+	unsigned char *key = pem_serialize_pubkey(pubkey, &keylen);
+
+    if (!key) {
+        handleErrors();
+    }
+
+    int pos = 0;
+    auto *buffer = new unsigned char[5+keylen];
+
+    memcpy(buffer+pos,":KEY ",5);
+    pos += 5;
+
+    memcpy(buffer+pos,key,keylen);
+
+
+    return buffer;
 }
 
 
@@ -419,7 +513,7 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
             // Cannot instantiate a Request to Talk if are already talking
         }
 
-        Client receivingClient = sendRequest(client,request);
+        Client& receivingClient = sendRequest(client,request);
         if (receivingClient == client) {
             // Client is not connected or not logged
             string response = "Client not connected or not logged";
@@ -449,15 +543,20 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
     }
     else if (strncmp(request.c_str(),":ACCEPT",7) ==0 ) {
         // Recover the requesting client from the receiver client istance, and forward the ACCEPT message
-        Client requestingClient = getClient(client);
+        Client &requestingClient = getClient(client);
         if (requestingClient == client) {
             // The requesting client probably disconnected
             string response = "The requesting client is disconnected";
             ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
         }
         else {
-            // Simply forward the ":ACCEPT to the requesting client"  
-            ret = sendToClient(requestingClient,request.c_str(),strlen(request.c_str()));
+            
+            unsigned char *messageOne = recoverKey(requestingClient,client);
+            unsigned char *messageTwo = recoverKey(client,requestingClient);
+            storeRequestingInfo(requestingClient,client);
+
+            ret = sendToClient(requestingClient,(char*)messageOne,strlen((char*)messageOne));
+            ret = sendToClient(client,(char*)messageTwo,strlen((char*)messageTwo));
         }
     }
     else if (strncmp(request.c_str(),":DENY",5) ==0 ) {
@@ -507,7 +606,7 @@ bool TcpServer::deleteClient(Client & client) {
  * from clients with IP address identical to
  * the specific observer requested IP
  */
-void TcpServer::publishClientMsg(const Client & client, const char * msg, size_t msgSize) {
+void TcpServer::publishClientMsg(Client & client, const char * msg, size_t msgSize) {
     for (uint i=0; i<m_subscribers.size(); i++) {
         if (m_subscribers[i].wantedIp == client.getIp() || m_subscribers[i].wantedIp.empty()) {
             if (m_subscribers[i].incoming_packet_func != NULL) {
@@ -524,7 +623,7 @@ void TcpServer::publishClientMsg(const Client & client, const char * msg, size_t
  * with IP address identical to the specific
  * observer requested IP
  */
-void TcpServer::publishClientDisconnected(const Client & client) {
+void TcpServer::publishClientDisconnected(Client & client) {
     for (uint i=0; i<m_subscribers.size(); i++) {
         if (m_subscribers[i].wantedIp == client.getIp()) {
             if (m_subscribers[i].disconnected_func != NULL) {
@@ -725,67 +824,94 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
  * Send message to specific client (determined by client IP address).
  * Return true if message was sent successfully
  */
-pipe_ret_t TcpServer::sendToClient(const Client & client, const char * msg, size_t size){
+pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t size){
     pipe_ret_t ret;
 
-    // Also this first part could be included in a utility function
-    unsigned char msg2[size];
-    strcpy((char*)msg2,msg);
-
-    unsigned char key_gcm[] = "1234567890123456";
-    unsigned char iv_gcm[] = "123456780912";
-    unsigned char *cphr_buf;
-    unsigned char *tag_buf;
-    int cphr_len;
-    int tag_len;
-    int pt_len = strlen(msg);
-
-    cphr_buf = (unsigned char*)malloc(size);
-    tag_buf = (unsigned char*)malloc(16);
-    cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key_gcm,iv_gcm,12,cphr_buf,tag_buf);
-
-    auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
-
-    int pos = 0;
-  
-    // copy iv
-    memcpy(buffer+pos, iv_gcm, 12);
-    pos += 12;
-    // delete [] iv_gcm;
-
-    //copio aad
-    memcpy((buffer+pos), iv_gcm, 12);
-    pos += 12;
-
-    //copio encrypted
-    memcpy((buffer+pos), cphr_buf, cphr_len);
-    pos += pt_len;
-    delete[] cphr_buf;
-
-    //copio tag
-    memcpy((buffer+pos), tag_buf, 16);
-    pos += 16;
-    delete [] tag_buf;
-
-    cout << "Server, dumping the encrypted payload: " << endl;
-    BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
-    cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
-
-    int numBytesSent = send(client.getFileDescriptor(), buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
-    if (numBytesSent < 0) { // send failed
-        ret.success = false;
-        ret.msg = strerror(errno);
+    if (client.isChatting()) {
+        int numBytesSent = send(client.getFileDescriptor(),msg,size,0);
+        if (numBytesSent < 0) { // send failed
+            ret.success = false;
+            ret.msg = strerror(errno);
+            return ret;
+        }
+        if ((uint)numBytesSent < size) { // not all bytes were sent
+            ret.success = false;
+            char msg[100];
+            sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
+            ret.msg = msg;
+            return ret;
+        }
+        ret.success = true;
         return ret;
     }
-    if ((uint)numBytesSent < size) { // not all bytes were sent
-        ret.success = false;
-        char msg[100];
-        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
-        ret.msg = msg;
+
+    else {
+
+        if (strncmp(msg,":KEY",4)==0) {
+            client.setChatting();
+        }
+
+        // Also this first part could be included in a utility function
+        unsigned char msg2[size];
+        strcpy((char*)msg2,msg);
+
+        unsigned char key_gcm[] = "1234567890123456";
+        unsigned char iv_gcm[] = "123456780912";
+        unsigned char *cphr_buf;
+        unsigned char *tag_buf;
+        int cphr_len;
+        int tag_len;
+        int pt_len = strlen(msg);
+
+        cphr_buf = (unsigned char*)malloc(size);
+        tag_buf = (unsigned char*)malloc(16);
+        cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key_gcm,iv_gcm,12,cphr_buf,tag_buf);
+
+        auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
+
+        int pos = 0;
+    
+        // copy iv
+        memcpy(buffer+pos, iv_gcm, 12);
+        pos += 12;
+        // delete [] iv_gcm;
+
+        //copio aad
+        memcpy((buffer+pos), iv_gcm, 12);
+        pos += 12;
+
+        //copio encrypted
+        memcpy((buffer+pos), cphr_buf, cphr_len);
+        pos += pt_len;
+        delete[] cphr_buf;
+
+        //copio tag
+        memcpy((buffer+pos), tag_buf, 16);
+        pos += 16;
+        delete [] tag_buf;
+
+        cout << "Server, dumping the encrypted payload: " << endl;
+        BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
+        cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
+
+        int numBytesSent = send(client.getFileDescriptor(), buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
+        if (numBytesSent < 0) { // send failed
+            ret.success = false;
+            ret.msg = strerror(errno);
+            return ret;
+        }
+        if ((uint)numBytesSent < size) { // not all bytes were sent
+            ret.success = false;
+            char msg[100];
+            sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
+            ret.msg = msg;
+            return ret;
+        }
+        ret.success = true;
         return ret;
     }
-    ret.success = true;
-    return ret;
+
+    
 }
 
 /**

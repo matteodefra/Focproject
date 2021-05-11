@@ -48,6 +48,13 @@ private:
     std::vector<client_observer_t> m_subscribers;
     // Thread handler
     std::thread * m_receiveTask = nullptr;
+    // Client name
+    std::string clientName;
+
+    EVP_PKEY *mykey;
+    EVP_PKEY *peerKey;
+
+    bool isChatting = false;
 
     // Client will also have a private key protected by a password
 
@@ -85,6 +92,18 @@ public:
     void subscribe(const client_observer_t & observer);
     void unsubscribeAll();
     // void publish(const char * msg, size_t msgSize);
+
+    void processRequest(unsigned char* plaintext_buffer);
+
+    bool getChatting() { return isChatting; }
+    void setChatting() { isChatting = true; }
+
+    void setClientName(std::string name) { clientName = name; }
+    string getClientName() { return clientName; }
+
+    void setAndStorePeerKey(unsigned char *key);
+
+    void saveMyKey();
 
     pipe_ret_t finish();
 };

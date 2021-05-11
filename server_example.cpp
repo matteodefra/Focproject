@@ -18,7 +18,7 @@ server_observer_t observer1, observer2;
 
 // observer callback. will be called for every new message received by clients
 // with the requested IP address
-void onIncomingMsg1(const Client & client, const char * msg, size_t size) {
+void onIncomingMsg1(Client & client, const char * msg, size_t size) {
     std::string msgStr = msg;
     // print the message content
     std::cout << "Observer1 got client msg: " << msgStr << std::endl;
@@ -60,7 +60,7 @@ void onIncomingMsg1(const Client & client, const char * msg, size_t size) {
 
 // observer callback. will be called for every new message received by clients
 // with the requested IP address
-void onIncomingMsg2(const Client & client, const char * msg, size_t size) {
+void onIncomingMsg2(Client & client, const char * msg, size_t size) {
     std::string msgStr = msg;
     // print client message
     std::cout << "Observer2 got client msg: " << msgStr << std::endl;
@@ -71,7 +71,7 @@ void onIncomingMsg2(const Client & client, const char * msg, size_t size) {
 }
 
 // observer callback. will be called when client disconnects
-void onClientDisconnected(const Client & client) {
+void onClientDisconnected(Client & client) {
     std::cout << "Client: " << client.getIp() << " disconnected: " << client.getInfoMessage() << std::endl;
 }
 

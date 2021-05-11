@@ -30,13 +30,13 @@ private:
     // EVP_PKEY* serverClientSymmetricKey;
 
     // Monitor online status of client
-    bool m_isConnected;
+    bool m_isConnected = false;
 
     // Needed to monitor the status of the chat
-    bool m_isChatting;
+    bool m_isChatting = false;
 
     // Authentication flag
-    bool m_isAuthenticated;
+    bool m_isAuthenticated = false;
 
     // Handler thread for the client thread 
     std::thread * m_threadHandler = nullptr;

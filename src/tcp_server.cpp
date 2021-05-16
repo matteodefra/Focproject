@@ -57,6 +57,34 @@ void handleErrors(void)
     abort();
 }
 
+unsigned char *pem_serialize_certificate(X509 *cert, size_t *len)
+{
+	assert(cert && len);
+	BIO *bio = BIO_new(BIO_s_mem());
+	if (!bio) {
+		handleErrors();
+		return NULL;
+	}
+	if (PEM_write_bio_X509(bio, cert) != 1) {
+		handleErrors();
+		BIO_free(bio);
+		return NULL;
+	}
+	char *buf;
+	*len = BIO_get_mem_data(bio, &buf);
+	if (*len <= 0 || !buf) {
+		handleErrors();
+		BIO_free(bio);
+		return NULL;
+	}
+	unsigned char *certificate = (unsigned char*)malloc(*len);
+	if (!certificate)
+		handleErrors();
+	memcpy(certificate, buf, *len);
+	BIO_free(bio);
+	return certificate;
+}
+
 
 unsigned char *pem_serialize_pubkey(EVP_PKEY *key, size_t *len)
 {
@@ -225,45 +253,52 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             }
         
             else {
-                cout << "Server, starting decryption settings..." << endl;
+                cout<<"msg:"<<endl;
+                cout<<msg<<endl;
+                if(strncmp(msg,":CERT",5) == 0 || strncmp(msg,":USER",5) == 0){ //These msg are sent in clear during the authentication phase
+                   processRequest(*client,msg);
+                } else{
+                    cout << "Server, starting decryption settings..." << endl;
 
-                unsigned char key_gcm[] = "1234567890123456";
+                    unsigned char key_gcm[] = "1234567890123456";
 
-                int pos = 0;
-                // retrieve IV
-                unsigned char iv_gcm[12];
-                memcpy(iv_gcm,msg+pos,12);
-                pos += 12;
+                    int pos = 0;
+                    // retrieve IV
+                    unsigned char iv_gcm[12];
+                    memcpy(iv_gcm,msg+pos,12);
+                    pos += 12;
 
-                // retrieve AAD
-                unsigned char AAD[12];
-                memcpy(AAD, msg+pos,12);
-                pos += 12;
+                    // retrieve AAD
+                    unsigned char AAD[12];
+                    memcpy(AAD, msg+pos,12);
+                    pos += 12;
 
-                // retrieve encrypted data
-                size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
-                unsigned char encryptedData[encrypted_len];
-                memcpy(encryptedData,msg+pos,encrypted_len);
-                pos += encrypted_len;
+                    // retrieve encrypted data
+                    size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
+                    unsigned char encryptedData[encrypted_len];
+                    memcpy(encryptedData,msg+pos,encrypted_len);
+                    pos += encrypted_len;
 
-                // retrieve tag
-                size_t tag_len = 16;
-                unsigned char tag[tag_len];
-                memcpy(tag, msg+pos, tag_len);
-                pos += tag_len;
+                    // retrieve tag
+                    size_t tag_len = 16;
+                    unsigned char tag[tag_len];
+                    memcpy(tag, msg+pos, tag_len);
+                    pos += tag_len;
 
-                unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
+                    unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
 
-                // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
-                int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
+                    // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
+                    int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key_gcm,iv_gcm,12,plaintext_buffer);
 
-                plaintext_buffer[encrypted_len] = '\0';
+                    plaintext_buffer[encrypted_len] = '\0';
 
-                cout << "Server, decrypted message: " << plaintext_buffer << endl;
+                    cout << "Server, decrypted message: " << plaintext_buffer << endl;
 
-                // Process client request 
-                processRequest(*client,(char*)plaintext_buffer);
-                free(plaintext_buffer);
+                    // Process client request 
+                    processRequest(*client,(char*)plaintext_buffer);
+                    free(plaintext_buffer);
+                }
+                
 
             }
             
@@ -486,6 +521,78 @@ unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
     return buffer;
 }
 
+/**
+ * 
+ */
+
+pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
+
+    cout<<"MSG:"<<endl;
+    cout<<msg<<endl;
+
+    pipe_ret_t ret;
+
+    //Retrieve username from msg
+
+    char *pointer = strtok((char*)msg.c_str()," ");
+    char* username;
+    vector<string> words;
+
+    while (pointer != NULL) { //putting the credentials into vector
+        words.push_back(pointer);
+        pointer = strtok(NULL," "); 
+    }
+
+    username = (char*)words.at(1).c_str();
+
+    cout<<"USERNAME:"<<endl;
+    cout<<username<<endl;
+
+
+    ifstream myfile;
+    myfile.open ("./AddOn/users.txt");
+    if (!myfile.is_open()) {
+      ret.msg = "ERROR: File open";
+      ret.success = false;
+      return ret;
+    }
+    bool found = false;
+    string user, password;
+    while (myfile >> user >> password){
+        if(user.compare(username) == 0) found = true;
+    }   
+    myfile.close();
+
+    if(found){
+
+        //TODO RICAVARE LA CHIAVE PUBBLICA DI TALE CLIENT 
+        
+        string response = "Client successfully recognize!";
+        int numBytesSent = send(client.getFileDescriptor(), (char*)response.c_str(), response.size(), 0);
+        if (numBytesSent < 0) { // send failed
+        ret.success = false;
+        ret.msg = strerror(errno);
+        return ret;
+        }
+        if ((uint)numBytesSent < response.size()) { // not all bytes were sent
+        ret.success = false;
+        char err_msg[100];
+        sprintf(err_msg, "Only %d bytes out of %lu was sent to client", numBytesSent, response.size());
+        ret.msg = err_msg;
+        return ret;
+        }
+
+        ret.msg = "Client recognized";
+        ret.success = true;
+        return ret;
+    } else{
+        ret.success = false;
+        ret.msg = "Client not recognize";
+        return ret;
+    }
+
+}
+
 
 /**
  * Util function used by server to dispatch the client request. Need to be implemented
@@ -558,6 +665,12 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
             ret = sendToClient(requestingClient,(char*)messageOne,strlen((char*)messageOne));
             ret = sendToClient(client,(char*)messageTwo,strlen((char*)messageTwo));
         }
+    }
+    else if (strncmp(request.c_str(),":CERT",5) == 0 ) {
+        ret = sendCertificate(client);
+    }
+    else if (strncmp(request.c_str(),":USER",5) == 0 ) {
+        ret = checkClientIdentity(client,request);
     }
     else if (strncmp(request.c_str(),":DENY",5) ==0 ) {
         // Recover the requesting client from the receiver client istance, and forward the DENY message
@@ -819,6 +932,49 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
     return ciphertext_len;
 }
 
+
+pipe_ret_t TcpServer::sendCertificate(Client & client){
+
+    pipe_ret_t ret;
+
+    // READ CERTIFICATE 
+
+    X509* server_cert;
+    FILE* server_file = fopen("./AddOn/ChatBox/ChatBox_App_cert.pem","r");
+    if(!server_file) { 
+        ret.success = false;
+        ret.msg = "Error opening certificate file";
+        return ret;
+    }
+    server_cert = PEM_read_X509(server_file,NULL,NULL,NULL);
+    if(!server_cert) {
+        ret.success = false;
+        ret.msg = "Error reading the certificate";
+        return ret;
+    }
+
+    fclose(server_file);
+
+    size_t cert_len;
+    unsigned char* certificate = pem_serialize_certificate(server_cert,&cert_len);
+    cout<<"CERTIFICATE:"<<endl;
+    cout<<certificate<<endl;
+    int numBytesSent = send(client.getFileDescriptor(), certificate, cert_len, 0);
+    if (numBytesSent < 0) { // send failed
+        ret.success = false;
+        ret.msg = strerror(errno);
+        return ret;
+    }
+    if ((uint)numBytesSent < cert_len) { // not all bytes were sent
+        ret.success = false;
+        char msg[100];
+        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, cert_len);
+        ret.msg = msg;
+        return ret;
+    }
+    ret.success = true;
+    return ret;
+}
 
 /*
  * Send message to specific client (determined by client IP address).

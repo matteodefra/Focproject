@@ -102,7 +102,9 @@ int main() {
  
     // send messages to server
     while(1)
-    {
+    {      
+
+        //if(client.getServerAuthenticated() == false) cout<<"We cannot verify the trustness of the server"<<endl;
         string msg;
         getline(cin,msg);   //"hello server\n";
         int valid = client.checkCommandValidity(msg);

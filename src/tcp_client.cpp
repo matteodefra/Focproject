@@ -81,6 +81,30 @@ EVP_PKEY *pem_deserialize_pubkey(unsigned char *key, size_t len)
 	return pubkey;
 }
 
+X509* pem_deserialize_certificate(unsigned char *certificate, size_t len)
+{
+	assert(certificate);
+	BIO *bio = BIO_new(BIO_s_mem());
+	if (!bio) {
+        cout<<"ER0"<<endl;
+		handleErrors();
+		return NULL;
+	}
+	if (BIO_write(bio, certificate, len) != (int)len) {
+        cout<<"ER1"<<endl;
+		handleErrors();
+		BIO_free(bio);
+		return NULL;
+	}
+	X509 *cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+	if (!cert){
+        cout<<"ER2"<<endl;
+        handleErrors();
+    }
+	BIO_free(bio);
+	return cert;
+}
+
 /**
  * This function take a :REG or :LOGIN msg and create and hash for the password
  * return the digest generated
@@ -331,7 +355,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         }
         EVP_PKEY_CTX_free(ctx_drv);
 
-        // Get first 16 bytes of shared secret, to use as key in AES
+        // Get first 16 bytes of shared secret, to use as key in AES //TODO HASHARE
         unsigned char *key = (unsigned char*)malloc(16);
         for (int i =0; i<16; i++) {
             key[i] = secret[i];
@@ -508,6 +532,58 @@ void TcpClient::publishServerDisconnected(const pipe_ret_t & ret) {
     }
 }
 
+bool TcpClient::clientAuthentication(){
+
+    //Send client msg with username
+    cout<<"Welcome, please enter your username:"<<endl;
+    size_t num_blank = 1; 
+
+    string username = "tommy"; //dovrebbe leggerlo da input
+    /*
+    while(num_blank != 0){
+        getline(cin,username); 
+        num_blank = count(username.begin(), username.end(),' '); //count blankets
+        if(num_blank != 0) { 
+            cout<<"Username can not contain blankets, please retry"<<endl;
+        }
+    }*/
+      
+    string username_msg = ":USER " + username;
+    cout<<"USERNAME MSG"<<endl;
+    cout<<username_msg<<endl;
+
+    int numBytesSent = send(m_sockfd, (char*)username_msg.c_str(), username_msg.size(), 0);
+
+    if (numBytesSent < 0 ) { // send failed
+        cout<<"Error sending the username"<<endl;
+        return false;
+    }
+    if ((uint)numBytesSent < username_msg.size()) { // not all bytes were sent
+        cout<<"Error sending the username, not all bytes were sent"<<endl;
+        return false;
+    }
+
+    char recv_msg[MAX_PACKET_SIZE];
+    int numOfBytesReceived = recv(m_sockfd, recv_msg, MAX_PACKET_SIZE, 0);
+
+    if(numOfBytesReceived < 1) {
+        cout<<"Error receinving the username verification"<<endl;
+        return false;
+    }
+    string success_msg = "Client successfully recognize!";
+    if(strcmp(recv_msg,(char*)success_msg.c_str()) == 0) {
+        cout<<"CLIENT RICONOSCIUTO"<<endl;
+        return true;
+    }
+        else {
+            cout<<"CLIENT NOT RECOGNIZED!"<<endl;
+            return false;
+        }
+
+
+}
+
+
 /**
  * First function that need to be implemented: the starting client,
  * after connection, will first authenticate, with a public key preinstalled 
@@ -515,10 +591,112 @@ void TcpClient::publishServerDisconnected(const pipe_ret_t & ret) {
  * password. After the autenthication, if everything went well client and 
  * server will negotiate a session key to use for their communication
  */
-void TcpClient::authenticateThroughServer() {
+bool TcpClient::authenticateServer() {
+
+
+    //Client Authentication
+
+    bool clientAuth = clientAuthentication();
+
+    if(clientAuth == false) return false;
+
+    //READ CERT_CA & CRL FROM FILE (known)
+    X509* cert_ca;
+    X509_CRL* crl_ca;
+
+    FILE* cert_file = fopen("./AddOn/CA/Certificates_CA_cert.pem","r");
+    if(!cert_file) { 
+        cout<<"Error opening the CA certificate file"<<endl;
+        return false;
+    }
+    cert_ca = PEM_read_X509(cert_file,NULL,NULL,NULL);
+    if(!cert_ca) {
+        cout<<"Error reading from the CA certificate file"<<endl;
+        return false;
+    }
+    fclose(cert_file);
+
+    FILE* crl_file = fopen("./AddOn/CA/Certificates_CA_crl.pem","r");
+    if(!crl_file){
+        cout<<"Error opening the CA CRL file"<<endl;
+        return false;
+    }
+    crl_ca = PEM_read_X509_CRL(crl_file,NULL,NULL,NULL);
+    if(!crl_ca){
+        cout<<"Error reading the CA CRL file"<<endl;
+        return false;
+    }
+    fclose(crl_file);
+
+    
+    //Create Store
+
+    X509_STORE* store = X509_STORE_new();
+    X509_STORE_add_cert(store,cert_ca);
+    X509_STORE_add_crl(store,crl_ca);
+    X509_STORE_set_flags(store,X509_V_FLAG_CRL_CHECK);
+
+
+    //Receive Certificate
+    string cert_str = ":CERT";
+
+    cout<<"MESSAGGIO INVIATO:"<<endl;
+    cout<<cert_str<<endl;
+
+    int numBytesSent = send(m_sockfd, (char*)cert_str.c_str(), cert_str.size(), 0);
+
+    if (numBytesSent < 0 ) { // send failed
+        cout<<"Error sending the certificate request"<<endl;
+        return false;
+    }
+    if ((uint)numBytesSent < cert_str.size()) { // not all bytes were sent
+        cout<<"Error sending the certificare request, not all bytes were sent"<<endl;
+        return false;
+    }
+
+    unsigned char recv_msg[MAX_PACKET_SIZE];
+    int numOfBytesReceived = recv(m_sockfd, recv_msg, MAX_PACKET_SIZE, 0);
+
+    if(numOfBytesReceived < 1) {
+        cout<<"Error receinving the certificate"<<endl;
+        return false;
+    }
+
+    cout<<recv_msg<<endl;
+
+    //Deserializing the msg
+
+    X509* server_cert = pem_deserialize_certificate(recv_msg,strlen((char*)recv_msg));
+
+    //Verify Certificate 
+
+    X509_STORE_CTX* ctx = X509_STORE_CTX_new();
+    X509_STORE_CTX_init(ctx,store,server_cert,NULL);
+    int ret = X509_verify_cert(ctx);
+    if(ret != 1) {
+        cout<<"Authentication Error"<<endl;
+        return false;
+    } else{
+        cout<<"Certificate Verification Success"<<endl;
+    }
+
+
+    X509_STORE_CTX_free(ctx);
+    X509_STORE_free(store);
+
+    //Extract the pubkey from the certificate 
+
+    EVP_PKEY* server_pubkey = X509_get_pubkey(server_cert);
+    if(!server_pubkey){
+        cout<<"Error retrieving the public key from certificate"<<endl;
+        return false;
+    }
+
+    serverKey = server_pubkey;
+
     // Send public key, authentication using certificates
     // Then symmetric session key negotiation via elliptic curve diffie hellman
-    return;
+    return true;
 }
 
 /**
@@ -614,7 +792,7 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
 void TcpClient::ReceiveTask() {
 
     // Whenever client thread starts, the first thing client will do is the authentication
-    authenticateThroughServer();
+    setServerAuthenticated(authenticateServer());
 
     while(!stop) {
         char msg[MAX_PACKET_SIZE];

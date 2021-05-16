@@ -53,8 +53,11 @@ private:
 
     EVP_PKEY *mykey;
     EVP_PKEY *peerKey;
+    EVP_PKEY *serverKey;
 
     bool isChatting = false;
+    bool isServerAuthenticated = false;
+   
 
     // Client will also have a private key protected by a password
 
@@ -68,6 +71,9 @@ private:
     void terminateReceiveThread();
 
 public:
+
+    
+    
     ~TcpClient();
 
     /** Function used to connect to the server (here security authentication  
@@ -82,8 +88,9 @@ public:
 
     unsigned char* pswHash(string msg);
 
-    // Function must be called at client start in order to authenticate 
-    void authenticateThroughServer();
+    // Function must be called at client start in order to authenticate the server, verifying its certificate
+    bool authenticateServer();
+    bool clientAuthentication();
 
     // Display all clients connected 
     void displayAllClients();
@@ -97,6 +104,9 @@ public:
 
     bool getChatting() { return isChatting; }
     void setChatting() { isChatting = true; }
+
+    bool getServerAuthenticated() { return isServerAuthenticated; }
+    void setServerAuthenticated(bool x) { isServerAuthenticated = x; }
 
     void setClientName(std::string name) { clientName = name; }
     string getClientName() { return clientName; }

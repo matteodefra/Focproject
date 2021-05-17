@@ -5,6 +5,7 @@
 #include <string>
 #include <thread>
 #include <functional>
+#include <openssl/evp.h>
 
 // Used by Server to monitor clients
 class Client {
@@ -22,6 +23,7 @@ private:
     int socketChattingClient;
 
     // Public key instance of client (stored a priori)
+    EVP_PKEY *clientPubKey;
 
     /** Shared symmetric key AES128 bit to use for symmetric communication
      *  Here client will also contain the shared symmetric key negotiated 
@@ -87,6 +89,8 @@ public:
     std::string getChattingClientIp() const { return ipChattingClient; }
     int getChattingClientSocket() const { return socketChattingClient; }
 
+    void setClientKey(EVP_PKEY *pubkey) { clientPubKey = pubkey; }
+    EVP_PKEY* getClientKey() { return clientPubKey; } 
 
     void setThreadHandler(std::function<void(void)> func) { m_threadHandler = new std::thread(func);}
 

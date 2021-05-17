@@ -53,7 +53,8 @@ private:
 
     EVP_PKEY *mykey;
     EVP_PKEY *peerKey;
-    EVP_PKEY *serverKey;
+    EVP_PKEY *serverRSAKey;
+    EVP_PKEY *serverDHKey;
 
     bool isChatting = false;
     bool isServerAuthenticated = false;

@@ -22,6 +22,7 @@
 #include "server_observer.h"
 #include "pipe_ret_t.h"
 #include "util.h"
+#include <openssl/evp.h>
 
 using namespace std;
 
@@ -41,6 +42,10 @@ private:
      * (stored in files .pem) and also a list of the symmetric key 
      * it negotiate with each one of them
      */
+    EVP_PKEY *serverPrivKey;
+
+    EVP_PKEY *serverDHPrivKey;
+    EVP_PKEY *serverDHPubKey;
 
     // Vector of all clients connected
     std::vector<Client> m_clients;
@@ -64,6 +69,21 @@ public:
     // Receive a client connection (here must be added the 
     // authentication of the server)
     Client acceptClient(uint timeout);
+
+    //
+    void setServerPrivKey(EVP_PKEY *privKey) { serverPrivKey = privKey; }
+    EVP_PKEY* getServerPrivKey() { return serverPrivKey; }
+
+    //
+    void setServerDHkeypair(EVP_PKEY* privateKey, EVP_PKEY* publicKey) {
+        serverDHPrivKey = privateKey;
+        serverDHPubKey = publicKey;
+    }
+    EVP_PKEY* getDHPublicKey() { return serverDHPubKey; }
+    EVP_PKEY* getDHPrivateKey() { return serverDHPrivKey; }
+
+    // 
+    void loadServerDHKeys();
 
     // Authentication function (parallel to authentication client)
     void authenticateServer();

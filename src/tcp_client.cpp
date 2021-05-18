@@ -313,6 +313,35 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
 }
 
 
+// char* getInputPassword(const char* username, int size) {
+    
+//     char *value = (char*)malloc(size);
+
+//     string val;
+
+//     getline(cin,val);
+
+//     value = (char*)val.c_str();
+//     return value;
+// }
+
+
+// int pem_password_callback(char *buf, int max_len, int flag, void *ctx)
+// {   
+//     cout << "Chiama sta merda" << endl;
+
+//     char* PASSWD = "marc";//getInputPassword((const char*)ctx,max_len);
+//     size_t len = strlen(PASSWD);
+
+//     if(len > max_len)
+//         return 0;
+
+//     memcpy(buf, PASSWD, len+1);
+//     OPENSSL_clear_free(PASSWD,len);
+//     return len;
+// }
+
+
 void TcpClient::saveMyKey() {
     string name = getClientName();
 
@@ -327,6 +356,8 @@ void TcpClient::saveMyKey() {
 
     mykey = PEM_read_PrivateKey(file,NULL,NULL,NULL);
     if (!mykey) handleErrors(); 
+
+    cout << mykey << endl;
 }
 
 
@@ -1156,6 +1187,9 @@ void TcpClient::processRequest(unsigned char* plaintext_buffer) {
 pipe_ret_t TcpClient::finish(){
     stop = true;
     terminateReceiveThread();
+    OPENSSL_free(mykey);
+    OPENSSL_free(serverDHKey);
+    OPENSSL_free(serverRSAKey);
     pipe_ret_t ret;
     if (close(m_sockfd) == -1) { // close failed
         ret.success = false;

@@ -73,6 +73,7 @@ void onIncomingMsg2(Client & client, const char * msg, size_t size) {
 // observer callback. will be called when client disconnects
 void onClientDisconnected(Client & client) {
     std::cout << "Client: " << client.getIp() << " disconnected: " << client.getInfoMessage() << std::endl;
+    OPENSSL_free(client.getClientKey());
 }
 
 int main(int argc, char *argv[])

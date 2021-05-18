@@ -1284,6 +1284,7 @@ pipe_ret_t TcpServer::finish() {
     pipe_ret_t ret;
     for (uint i=0; i<m_clients.size(); i++) {
         m_clients[i].setDisconnected();
+        OPENSSL_free(m_clients[i].getClientKey());
         if (close(m_clients[i].getFileDescriptor()) == -1) { // close failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -1296,6 +1297,9 @@ pipe_ret_t TcpServer::finish() {
         return ret;
     }
     m_clients.clear();
+    OPENSSL_free(serverPrivKey);
+    OPENSSL_free(serverDHPrivKey);
+    OPENSSL_free(serverDHPubKey);
     ret.success = true;
     return ret;
 }

@@ -305,7 +305,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     cout << "Server, starting decryption settings..." << endl;
 
                     // Derive the shared secret
-                    EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(serverDHPrivKey, NULL);
+                    EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(getDHPublicKey(), NULL);
                     EVP_PKEY_derive_init(ctx_drv);
                     if (1 != EVP_PKEY_derive_set_peer(ctx_drv, client->getClientKeyDH())) {
                         handleErrors();
@@ -587,19 +587,8 @@ Client& TcpServer::getClient(Client &client) {
  */
 unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
 
-    string clientName = clientTwo.getClientName();
-
-    string path = "./AddOn/" + clientName + "_pub.pem";
-
-    FILE *file = fopen(path.c_str(),"r");
-    if (!file) {
-        handleErrors();
-    }
-
-    EVP_PKEY *pubkey = PEM_read_PUBKEY(file,NULL,NULL,NULL);
-
     size_t keylen;
-	unsigned char *key = pem_serialize_pubkey(pubkey, &keylen);
+	unsigned char *key = pem_serialize_pubkey(clientTwo.getClientKeyDH(), &keylen);
 
     if (!key) {
         handleErrors();
@@ -614,7 +603,7 @@ unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
     memcpy(buffer+pos,key,keylen);
 
     free(key);
-    EVP_PKEY_free(pubkey);
+    // EVP_PKEY_free(pubkey);
 
     return buffer;
 }
@@ -637,7 +626,11 @@ void setClientPublicKey(Client &client, char *username) {
         handleErrors();
     }
 
+    cout << "Pubkey retrieved: " << pubkey << endl;
+
     client.setClientKeyRSA(pubkey);
+
+    cout << "Client pubkey: " << client.getClientKeyRSA() << endl;
 
     // !!!!!
     // EVP_PKEY_free(pubkey);
@@ -791,6 +784,9 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
             unsigned char *messageTwo = recoverKey(client,requestingClient);
             storeRequestingInfo(requestingClient,client);
 
+            cout << "Message one: " << messageOne << endl;
+            cout << "Message two: " << messageTwo << endl;
+
             ret = sendToClient(requestingClient,(char*)messageOne,strlen((char*)messageOne));
             ret = sendToClient(client,(char*)messageTwo,strlen((char*)messageTwo));
         }
@@ -877,25 +873,50 @@ void TcpServer::publishClientDisconnected(Client & client) {
  */ 
 void TcpServer::loadServerDHKeys() {
 
-    string path1 = "./AddOn/serverDHkey.pem"; 
-    FILE *file1 = fopen(path1.c_str(),"r");
-    if (!file1) handleErrors();
+    EVP_PKEY* dh_params;
+    DH* tmp = get_dh2048();
+    dh_params = EVP_PKEY_new();
+    // Loading the dh parameters into dhparams structure
+    int res = EVP_PKEY_set1_DH(dh_params,tmp);
+    DH_free(tmp);
 
-    EVP_PKEY *privkey = PEM_read_PrivateKey(file1,NULL,NULL,NULL);
-    if (!privkey) handleErrors(); 
+    if (res == 0) {
+        cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
+        return;
+    }
 
-    fclose(file1);
+    // Generation of the public key
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(dh_params, NULL);
+    EVP_PKEY* my_pubkey = NULL;
+    EVP_PKEY_keygen_init(ctx);
+    if (EVP_PKEY_keygen(ctx, &my_pubkey)!=1) {
+        cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
+        return;
+    }
 
-    string path2 = "./AddOn/serverDHpubkey.pem"; 
-    FILE *file2 = fopen(path2.c_str(),"r");
-    if (!file2) handleErrors();
+    EVP_PKEY_CTX_free(ctx);
 
-    EVP_PKEY *pubkey = PEM_read_PUBKEY(file2,NULL,NULL,NULL);
-    if (!pubkey) handleErrors(); 
+    setServerDHPubKey(my_pubkey);
 
-    setServerDHkeypair(privkey,pubkey);
+    // string path1 = "./AddOn/serverDHkey.pem"; 
+    // FILE *file1 = fopen(path1.c_str(),"r");
+    // if (!file1) handleErrors();
 
-    fclose(file2);
+    // EVP_PKEY *privkey = PEM_read_PrivateKey(file1,NULL,NULL,NULL);
+    // if (!privkey) handleErrors(); 
+
+    // fclose(file1);
+
+    // string path2 = "./AddOn/serverDHpubkey.pem"; 
+    // FILE *file2 = fopen(path2.c_str(),"r");
+    // if (!file2) handleErrors();
+
+    // EVP_PKEY *pubkey = PEM_read_PUBKEY(file2,NULL,NULL,NULL);
+    // if (!pubkey) handleErrors(); 
+
+    // setServerDHkeypair(privkey,pubkey);
+
+    // fclose(file2);
 
     // !!!!!
     // EVP_PKEY_free(pubkey);
@@ -1139,7 +1160,12 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
     // Now server will receive signature of a message encrypted with client private key. Server will verify 
     // the authencity through its known public key
     char signature[MAX_PACKET_SIZE];
+    memset(signature,0,MAX_PACKET_SIZE);
     int numOfBytesReceived = recv(client.getFileDescriptor(), signature, MAX_PACKET_SIZE, 0);
+
+    cout << "Signature received: " << signature << endl;
+
+    cout << "Bytes received " << numOfBytesReceived << endl;
 
     if(numOfBytesReceived < 1) {
         client.setDisconnected();
@@ -1165,7 +1191,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
         // Verify the signature in the file
         EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
         if (!md_ctx) {
-            cout << "ERROR!" << endl;
+            cout << "ERROR1!" << endl;
             ERR_print_errors_fp(stderr);
             ret.success = false;
             return ret;
@@ -1173,7 +1199,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
 
         res = EVP_VerifyInit(md_ctx,EVP_sha256());
         if (res == 0) {
-            cout << "ERROR!" << endl;
+            cout << "ERROR2!" << endl;
             ERR_print_errors_fp(stderr);
             ret.success = false;
             return ret;
@@ -1181,7 +1207,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
 
         res = EVP_VerifyUpdate(md_ctx,clear_buf,clear_size);
         if (res == 0) {
-            cout << "ERROR!" << endl;
+            cout << "ERROR3!" << endl;
             ERR_print_errors_fp(stderr);
             ret.success = false;
             return ret;
@@ -1189,7 +1215,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
 
         res = EVP_VerifyFinal(md_ctx,(unsigned char*)signature,numOfBytesReceived,client.getClientKeyRSA());
         if (res == 0) {
-            cout << "ERROR!" << endl;
+            cout << "ERROR4!" << endl;
             ERR_print_errors_fp(stderr);
             ret.success = false;
             return ret;
@@ -1314,11 +1340,15 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
     else {
 
         if (strncmp(msg,":KEY",4)==0) {
+            cout << "Setting client in chatting mode" << endl;
             client.setChatting();
         }
 
+        cout << "Server pub key: " << getDHPublicKey() << endl;
+        cout << "Client pub key: " << client.getClientKeyDH() << endl;
+
         // Derive the shared secret
-        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(serverDHPrivKey, NULL);
+        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(getDHPublicKey(), NULL);
         EVP_PKEY_derive_init(ctx_drv);
         if (1 != EVP_PKEY_derive_set_peer(ctx_drv, client.getClientKeyDH())) {
             handleErrors();
@@ -1467,7 +1497,7 @@ pipe_ret_t TcpServer::finish() {
     }
     m_clients.clear();
     OPENSSL_free(serverPrivKey);
-    OPENSSL_free(serverDHPrivKey);
+    OPENSSL_free(serverDHPubKey);
     OPENSSL_free(serverDHPubKey);
     ret.success = true;
     return ret;

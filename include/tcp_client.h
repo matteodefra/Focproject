@@ -69,7 +69,6 @@ private:
 public:
 
     EVP_PKEY *mykey_RSA;
-    EVP_PKEY *mykey;
     EVP_PKEY *mykey_pub;
     EVP_PKEY *peerKey;
     EVP_PKEY *serverRSAKey;
@@ -115,6 +114,8 @@ public:
     void setAndStorePeerKey(unsigned char *key);
 
     void saveMyKey();
+
+    int generateDHKeypairs();
 
     pipe_ret_t finish();
 };

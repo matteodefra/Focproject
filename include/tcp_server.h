@@ -44,7 +44,6 @@ private:
      */
     EVP_PKEY *serverPrivKey;
 
-    EVP_PKEY *serverDHPrivKey;
     EVP_PKEY *serverDHPubKey;
 
     // Vector of all clients connected
@@ -75,12 +74,10 @@ public:
     EVP_PKEY* getServerPrivKey() { return serverPrivKey; }
 
     //
-    void setServerDHkeypair(EVP_PKEY* privateKey, EVP_PKEY* publicKey) {
-        serverDHPrivKey = privateKey;
+    void setServerDHPubKey(EVP_PKEY* publicKey) {
         serverDHPubKey = publicKey;
     }
     EVP_PKEY* getDHPublicKey() { return serverDHPubKey; }
-    EVP_PKEY* getDHPrivateKey() { return serverDHPrivKey; }
 
     // 
     void loadServerDHKeys();

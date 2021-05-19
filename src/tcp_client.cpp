@@ -330,6 +330,34 @@ static int _callback(char *buf, int max_len, int flag, void *ctx)
 }
 
 
+int TcpClient::generateDHKeypairs() {
+
+    EVP_PKEY* dh_params;
+    DH* tmp = get_dh2048();
+    dh_params = EVP_PKEY_new();
+    // Loading the dh parameters into dhparams structure
+    int res = EVP_PKEY_set1_DH(dh_params,tmp);
+    DH_free(tmp);
+
+    if (res == 0) {
+        cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
+        return 0;
+    }
+
+    // Generation of the public key
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(dh_params, NULL);
+    EVP_PKEY* my_pubkey = NULL;
+    EVP_PKEY_keygen_init(ctx);
+    if (EVP_PKEY_keygen(ctx, &my_pubkey)!=1) {
+        cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
+        return 0;
+    }
+
+    mykey_pub = my_pubkey;    
+
+}
+
+
 void TcpClient::saveMyKey() {
     string name = getClientName();
 
@@ -342,6 +370,11 @@ void TcpClient::saveMyKey() {
     FILE *file = fopen(path.c_str(),"r");
     if (!file) handleErrors();
 
+    // cout << "Input password for RSA private key" << endl;
+    // string val;
+    // getline(cin,val);
+
+    // mykey_RSA = PEM_read_PrivateKey(file,NULL,_callback,(void*)val.c_str());
     mykey_RSA = PEM_read_PrivateKey(file,NULL,NULL,NULL);
     if (!mykey_RSA) handleErrors(); 
 
@@ -350,35 +383,37 @@ void TcpClient::saveMyKey() {
     cout<<"mykey_RSA:"<<endl;
     cout << mykey_RSA << endl;
 
-    string path1 = "./AddOn/" + name + "/" + name + ".pem"; 
+    generateDHKeypairs();
 
-    cout << "Path to priv DH key: " << path1 << endl;
+    // string path1 = "./AddOn/" + name + "/" + name + ".pem"; 
+
+    // cout << "Path to priv DH key: " << path1 << endl;
  
-    FILE *file1 = fopen(path.c_str(),"r");
-    if (!file1) handleErrors();
+    // FILE *file1 = fopen(path1.c_str(),"r");
+    // if (!file1) handleErrors();
 
-    mykey = PEM_read_PrivateKey(file1,NULL,NULL,NULL);
-    if (!mykey) handleErrors(); 
+    // mykey = PEM_read_PrivateKey(file1,NULL,NULL,NULL);
+    // if (!mykey) handleErrors(); 
 
-    fclose(file1);
+    // fclose(file1);
 
-    cout<<"mykey:"<<endl;
-    cout << mykey << endl;
+    // cout<<"mykey:"<<endl;
+    // cout << mykey << endl;
 
-    string path2 = "./AddOn/" + name + "_pub.pem"; 
+    // string path2 = "./AddOn/" + name + "_pub.pem"; 
 
-    cout << "Path to priv DH key: " << path2 << endl;
+    // cout << "Path to pub DH key: " << path2 << endl;
  
-    FILE *file2 = fopen(path.c_str(),"r");
-    if (!file2) handleErrors();
+    // FILE *file2 = fopen(path2.c_str(),"r");
+    // if (!file2) handleErrors();
 
-    mykey_pub = PEM_read_PrivateKey(file2,NULL,NULL,NULL);
-    if (!mykey_pub) handleErrors(); 
+    // mykey_pub = PEM_read_PUBKEY(file2,NULL,NULL,NULL);
+    // if (!mykey_pub) handleErrors(); 
 
-    fclose(file2);
+    // fclose(file2);
 
-    cout<<"mykey_pub:"<<endl;
-    cout << mykey_pub << endl;
+    // cout<<"mykey_pub:"<<endl;
+    // cout << mykey_pub << endl;
 }
 
 
@@ -391,7 +426,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 
     if (getChatting()) {
         // Derive the shared secret
-        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey, NULL);
+        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey_pub, NULL);
         EVP_PKEY_derive_init(ctx_drv);
         if (1 != EVP_PKEY_derive_set_peer(ctx_drv, peerKey)) {
             handleErrors();
@@ -542,11 +577,11 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 
         cout << "Send client, deriving shared secret" << endl;
 
-        cout << "My key: " << mykey << endl;
+        // cout << "My key: " << mykey << endl;
         cout << "Server key: " << serverDHKey << endl; 
 
         // Derive the shared secret
-        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey, NULL);
+        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey_pub, NULL);
         EVP_PKEY_derive_init(ctx_drv);
         if (1 != EVP_PKEY_derive_set_peer(ctx_drv, serverDHKey)) {
             cout << "Crash here just at start" << endl;
@@ -827,6 +862,7 @@ bool TcpClient::authenticateServer() {
 
     //TODO: Need to receive the exact bytes of the certificate!! Two consecutive recv
     unsigned char recv_msg[MAX_PACKET_SIZE];
+    memset(recv_msg,0,MAX_PACKET_SIZE);
     int numOfBytesReceived = recv(m_sockfd, recv_msg, MAX_PACKET_SIZE, 0);
 
     if(numOfBytesReceived < 1) {
@@ -883,7 +919,7 @@ bool TcpClient::authenticateServer() {
         return false;
     }
 
-    ret = EVP_SignInit(md_ctx,EVP_sha224());
+    ret = EVP_SignInit(md_ctx,EVP_sha256());
     if (ret == 0) {
         cout << "ERROR!" << endl;
         ERR_print_errors_fp(stderr);
@@ -906,7 +942,11 @@ bool TcpClient::authenticateServer() {
     EVP_MD_CTX_free(md_ctx);
     // EVP_PKEY_free(mykey);
 
-    int numBytesSent3 = send(m_sockfd, (char*)signature, signature_len, 0);
+    cout << "Client signature: " << signature << endl;
+
+    cout << "Client signature len: " << signature_len << endl;
+
+    int numBytesSent3 = send(m_sockfd, signature, signature_len, 0);
 
     if (numBytesSent3 < 0 ) { // send failed
         cout<<"Error sending the signature"<<endl;
@@ -1087,7 +1127,7 @@ void TcpClient::ReceiveTask() {
 
             if (getChatting()) {
                 // Derive the shared secret
-                EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey, NULL);
+                EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey_pub, NULL);
                 EVP_PKEY_derive_init(ctx_drv);
                 if (1 != EVP_PKEY_derive_set_peer(ctx_drv, peerKey)) {
                     handleErrors();
@@ -1180,7 +1220,7 @@ void TcpClient::ReceiveTask() {
                 cout << "Client: start decryption process..." << endl;
 
                 // Derive the shared secret
-                EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey, NULL);
+                EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey_pub, NULL);
                 EVP_PKEY_derive_init(ctx_drv);
                 if (1 != EVP_PKEY_derive_set_peer(ctx_drv, serverDHKey)) {
                     handleErrors();
@@ -1310,7 +1350,7 @@ void TcpClient::processRequest(unsigned char* plaintext_buffer) {
 pipe_ret_t TcpClient::finish(){
     stop = true;
     terminateReceiveThread();
-    OPENSSL_free(mykey);
+    // OPENSSL_free(mykey);
     OPENSSL_free(serverDHKey);
     OPENSSL_free(serverRSAKey);
     pipe_ret_t ret;

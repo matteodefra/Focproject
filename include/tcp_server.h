@@ -121,10 +121,17 @@ public:
      * be modified in order to send the request to talk)
      * finish() will close the server and free clients resources
      */
+
+    
+
     pipe_ret_t sendToAllClients(const char * msg, size_t size);
     pipe_ret_t sendToClient(Client & client, const char * msg, size_t size);
     pipe_ret_t sendCertificate(Client & client);
+    pipe_ret_t verifySignature(Client & client);
+    pipe_ret_t sendDHPubkey(Client & client);
     pipe_ret_t checkClientIdentity(Client & client,string msg);
+    pipe_ret_t receiveClientPubkeyDH(Client & client);
+    pipe_ret_t authenticationStart(Client & client,string msg);
     pipe_ret_t finish();
     void printClients();
 };

@@ -42,10 +42,51 @@ void TcpServer::printClients() {
  * (which is stored from start as guideline). Than will communicate its certificate 
  * authority in order to prove its affidability. Then symmetric key is negotiated
  */
-void authenticateServer() {
+pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
+
+    pipe_ret_t ret;
+
+    ret = checkClientIdentity(client,msg);
+
+    if(ret.success == false) return ret;
+
+    //:CERT request message
+
+    unsigned char cert_req_msg[MAX_PACKET_SIZE];
+    int numOfBytesReceived = recv(client.getFileDescriptor(), cert_req_msg, MAX_PACKET_SIZE, 0);;
+
+    if(numOfBytesReceived < 1) {
+        ret.msg = "Error receinving the certificate request";
+        ret.success = false;
+        return ret;
+    }
+
+    if(strncmp((char*)cert_req_msg,":CERT",5) != 0) {
+        ret.msg = "Certificate request message not as expected";
+        ret.success = false;
+        return ret;
+    }
+
+    cout<<cert_req_msg<<endl;
+
+    ret = sendCertificate(client);
+    if(ret.success == false) return ret;
+
+    ret = verifySignature(client);
+    if(ret.success == false) return ret;
+
+    ret = sendDHPubkey(client);
+    if(ret.success == false) return ret;
+
+    ret = receiveClientPubkeyDH(client);
+    if(ret.success == false) return ret;
+
     // send certificate
     // negotiate elliptic curve diffie hellman key
-    return;
+    cout<<"Authentication completed, DH keys exchanged"<<endl;
+    ret.msg = "Authentication completed, DH keys exchanged";
+    ret.success = true;
+    return ret;
 }
 
 /**
@@ -256,7 +297,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             else {
                 cout<<"msg:"<<endl;
                 cout<<msg<<endl;
-                if(strncmp(msg,":CERT",5) == 0 || strncmp(msg,":USER",5) == 0){ //These msg are sent in clear during the authentication phase
+                if(strncmp(msg,":USER",5) == 0){ //These msg are sent in clear during the authentication phase
                     cout << "Enter here? " << msg << endl;
                     processRequest(*client,msg);
                 } 
@@ -266,7 +307,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     // Derive the shared secret
                     EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(serverDHPrivKey, NULL);
                     EVP_PKEY_derive_init(ctx_drv);
-                    if (1 != EVP_PKEY_derive_set_peer(ctx_drv, client->getClientKey())) {
+                    if (1 != EVP_PKEY_derive_set_peer(ctx_drv, client->getClientKeyDH())) {
                         handleErrors();
                     }
                     unsigned char* secret;
@@ -583,7 +624,7 @@ void setClientPublicKey(Client &client, char *username) {
 
     string name(username);
 
-    string path = "./AddOn/" + name + "_pub.pem";    
+    string path = "./AddOn/" + name + "_pubRSA.pem";    
 
 
     FILE *file = fopen(path.c_str(),"r");
@@ -596,7 +637,7 @@ void setClientPublicKey(Client &client, char *username) {
         handleErrors();
     }
 
-    client.setClientKey(pubkey);
+    client.setClientKeyRSA(pubkey);
 
     // !!!!!
     // EVP_PKEY_free(pubkey);
@@ -754,11 +795,8 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
             ret = sendToClient(client,(char*)messageTwo,strlen((char*)messageTwo));
         }
     }
-    else if (strncmp(request.c_str(),":CERT",5) == 0 ) {
-        ret = sendCertificate(client);
-    }
     else if (strncmp(request.c_str(),":USER",5) == 0 ) {
-        ret = checkClientIdentity(client,request);
+        ret = authenticationStart(client,request);
     }
     else if (strncmp(request.c_str(),":DENY",5) ==0 ) {
         // Recover the requesting client from the receiver client istance, and forward the DENY message
@@ -1071,6 +1109,129 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
     return ciphertext_len;
 }
 
+pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client){
+
+    pipe_ret_t ret;
+
+    unsigned char pubkey_dh[MAX_PACKET_SIZE];
+    int numOfBytesReceived = recv(client.getFileDescriptor(), pubkey_dh, MAX_PACKET_SIZE, 0);;
+
+    if(numOfBytesReceived < 1) {
+        ret.msg = "Error receinving the certificate request";
+        ret.success = false;
+        return ret;
+    }
+
+    cout << "Client DH public key here: " << pubkey_dh << endl; 
+
+    EVP_PKEY* pubkeyDH = pem_deserialize_pubkey(pubkey_dh,numOfBytesReceived);
+    client.setClientKeyDH(pubkeyDH);
+    ret.success = true;
+    return ret;
+
+}
+
+
+pipe_ret_t TcpServer::verifySignature(Client & client){
+
+    pipe_ret_t ret;
+
+    // Now server will receive signature of a message encrypted with client private key. Server will verify 
+    // the authencity through its known public key
+    char signature[MAX_PACKET_SIZE];
+    int numOfBytesReceived = recv(client.getFileDescriptor(), signature, MAX_PACKET_SIZE, 0);
+
+    if(numOfBytesReceived < 1) {
+        client.setDisconnected();
+        if (numOfBytesReceived == 0) { //client closed connection
+            client.setErrorMessage("Client closed connection");
+            //printf("client closed");
+        } else {
+            client.setErrorMessage(strerror(errno));
+        }
+        close(client.getFileDescriptor());
+        publishClientDisconnected(client);
+        deleteClient(client);
+        ret.success = false;
+        return ret;
+    }
+    else {
+
+        char *clear_buf = (char*)client.getClientName().c_str();
+        strcat(clear_buf," user");
+        int clear_size = strlen(clear_buf);
+
+        int res;
+        // Verify the signature in the file
+        EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
+        if (!md_ctx) {
+            cout << "ERROR!" << endl;
+            ERR_print_errors_fp(stderr);
+            ret.success = false;
+            return ret;
+        }
+
+        res = EVP_VerifyInit(md_ctx,EVP_sha256());
+        if (res == 0) {
+            cout << "ERROR!" << endl;
+            ERR_print_errors_fp(stderr);
+            ret.success = false;
+            return ret;
+        }
+
+        res = EVP_VerifyUpdate(md_ctx,clear_buf,clear_size);
+        if (res == 0) {
+            cout << "ERROR!" << endl;
+            ERR_print_errors_fp(stderr);
+            ret.success = false;
+            return ret;
+        }
+
+        res = EVP_VerifyFinal(md_ctx,(unsigned char*)signature,numOfBytesReceived,client.getClientKeyRSA());
+        if (res == 0) {
+            cout << "ERROR!" << endl;
+            ERR_print_errors_fp(stderr);
+            ret.success = false;
+            return ret;
+        }
+
+        cout << "Signature verified correctly! Client is authorized" << endl;
+        ret.success = true;
+        return ret;
+    }
+
+
+}
+
+pipe_ret_t TcpServer::sendDHPubkey(Client & client){
+
+    pipe_ret_t ret;
+
+    
+    // Now server will send its public key generated with diffie hellman parameters
+    size_t key_len;
+    unsigned char* publicKey = pem_serialize_pubkey(getDHPublicKey(),&key_len);
+    cout<<"DH PUBKEY:"<<endl;
+    cout<<publicKey<<endl;
+    int numBytesSent2 = send(client.getFileDescriptor(), publicKey, key_len, 0);
+    if (numBytesSent2 < 0) { // send failed
+        ret.success = false;
+        ret.msg = strerror(errno);
+        return ret;
+    }
+    if ((uint)numBytesSent2 < key_len) { // not all bytes were sent
+        ret.success = false;
+        char msg[100];
+        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent2, key_len);
+        ret.msg = msg;
+        return ret;
+    }
+    ret.success = true; 
+    free(publicKey);
+    
+    return ret;
+
+}
 
 pipe_ret_t TcpServer::sendCertificate(Client & client){
 
@@ -1114,96 +1275,14 @@ pipe_ret_t TcpServer::sendCertificate(Client & client){
         return ret;
     }
     ret.success = true;
-    // return ret;
+    
 
     OPENSSL_free(certificate);
-
-
-    // Now server will receive signature of a message encrypted with client private key. Server will verify 
-    // the authencity through its known public key
-    char signature[MAX_PACKET_SIZE];
-    int numOfBytesReceived = recv(client.getFileDescriptor(), signature, MAX_PACKET_SIZE, 0);
-
-    if(numOfBytesReceived < 1) {
-        client.setDisconnected();
-        if (numOfBytesReceived == 0) { //client closed connection
-            client.setErrorMessage("Client closed connection");
-            //printf("client closed");
-        } else {
-            client.setErrorMessage(strerror(errno));
-        }
-        close(client.getFileDescriptor());
-        publishClientDisconnected(client);
-        deleteClient(client);
-        ret.success = false;
-    }
-    else {
-
-        char *clear_buf = (char*)client.getClientName().c_str();
-        strcat(clear_buf," user");
-        int clear_size = strlen(clear_buf);
-
-        int res;
-        // Verify the signature in the file
-        EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
-        if (!md_ctx) {
-            cout << "ERROR!" << endl;
-            ERR_print_errors_fp(stderr);
-            ret.success = false;
-            return ret;
-        }
-
-        res = EVP_VerifyInit(md_ctx,EVP_sha256());
-        if (res == 0) {
-            cout << "ERROR!" << endl;
-            ERR_print_errors_fp(stderr);
-            ret.success = false;
-            return ret;
-        }
-
-        res = EVP_VerifyUpdate(md_ctx,clear_buf,clear_size);
-        if (res == 0) {
-            cout << "ERROR!" << endl;
-            ERR_print_errors_fp(stderr);
-            ret.success = false;
-            return ret;
-        }
-
-        res = EVP_VerifyFinal(md_ctx,(unsigned char*)signature,numOfBytesReceived,client.getClientKey());
-        if (res == 0) {
-            cout << "ERROR!" << endl;
-            ERR_print_errors_fp(stderr);
-            ret.success = false;
-            return ret;
-        }
-
-        cout << "Signature verified correctly! Client is authorized" << endl;
-    }
-
-
-    // Now server will send its public key generated with diffie hellman parameters
-    size_t key_len;
-    unsigned char* publicKey = pem_serialize_pubkey(getDHPublicKey(),&key_len);
-    cout<<"DH PUBKEY:"<<endl;
-    cout<<publicKey<<endl;
-    int numBytesSent2 = send(client.getFileDescriptor(), publicKey, key_len, 0);
-    if (numBytesSent2 < 0) { // send failed
-        ret.success = false;
-        ret.msg = strerror(errno);
-        return ret;
-    }
-    if ((uint)numBytesSent2 < key_len) { // not all bytes were sent
-        ret.success = false;
-        char msg[100];
-        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent2, key_len);
-        ret.msg = msg;
-        return ret;
-    }
-    ret.success = true; 
-
-    free(publicKey);
     
     return ret;
+
+    /* */
+ 
 
 }
 
@@ -1241,7 +1320,7 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
         // Derive the shared secret
         EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(serverDHPrivKey, NULL);
         EVP_PKEY_derive_init(ctx_drv);
-        if (1 != EVP_PKEY_derive_set_peer(ctx_drv, client.getClientKey())) {
+        if (1 != EVP_PKEY_derive_set_peer(ctx_drv, client.getClientKeyDH())) {
             handleErrors();
         }
         unsigned char* secret;
@@ -1374,7 +1453,7 @@ pipe_ret_t TcpServer::finish() {
     pipe_ret_t ret;
     for (uint i=0; i<m_clients.size(); i++) {
         m_clients[i].setDisconnected();
-        OPENSSL_free(m_clients[i].getClientKey());
+        OPENSSL_free(m_clients[i].getClientKeyDH());
         if (close(m_clients[i].getFileDescriptor()) == -1) { // close failed
             ret.success = false;
             ret.msg = strerror(errno);

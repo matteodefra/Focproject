@@ -313,33 +313,21 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
 }
 
 
-// char* getInputPassword(const char* username, int size) {
-    
-//     char *value = (char*)malloc(size);
+static int _callback(char *buf, int max_len, int flag, void *ctx)
+{   
 
-//     string val;
+    cout << "callback called" << endl;
 
-//     getline(cin,val);
+    char *PASSWD = (char*)ctx;
+    size_t len = strlen(PASSWD);
 
-//     value = (char*)val.c_str();
-//     return value;
-// }
+    if(len > max_len)
+        return 0;
 
-
-// int pem_password_callback(char *buf, int max_len, int flag, void *ctx)
-// {   
-//     cout << "Chiama sta merda" << endl;
-
-//     char* PASSWD = "marc";//getInputPassword((const char*)ctx,max_len);
-//     size_t len = strlen(PASSWD);
-
-//     if(len > max_len)
-//         return 0;
-
-//     memcpy(buf, PASSWD, len+1);
-//     OPENSSL_clear_free(PASSWD,len);
-//     return len;
-// }
+    memcpy(buf, PASSWD, len+1);
+    OPENSSL_clear_free(PASSWD,len);
+    return len;
+}
 
 
 void TcpClient::saveMyKey() {
@@ -354,8 +342,18 @@ void TcpClient::saveMyKey() {
     FILE *file = fopen(path.c_str(),"r");
     if (!file) handleErrors();
 
+    // OpenSSL_add_all_algorithms();
+
+    // string val;
+
+    // cout << "Waiting for input pass..." << endl;
+    // getline(cin,val);
+
+    // mykey = PEM_read_PrivateKey(file,NULL,(pem_password_cb*)_callback,(void*)val.c_str());
     mykey = PEM_read_PrivateKey(file,NULL,NULL,NULL);
     if (!mykey) handleErrors(); 
+
+    fclose(file);
 
     cout << mykey << endl;
 }
@@ -416,6 +414,9 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         // }
         memcpy(key,digest,16);
 
+        free(secret);
+        free(digest);
+
         // Also this section could be moved in an utility function
         unsigned char msg2[size];
         strcpy((char*)msg2,msg);
@@ -432,6 +433,8 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key,iv_gcm,12,cphr_buf,tag_buf);
 
         auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
+
+        free(key);
 
         int pos = 0;
     
@@ -490,6 +493,8 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
             setClientName(pointer);
             saveMyKey();
 
+            free(copy);
+
             cout << "Saved key successful" << endl;
 
             unsigned char msg2[size];
@@ -514,10 +519,14 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 
         cout << "Send client, deriving shared secret" << endl;
 
+        cout << "My key: " << mykey << endl;
+        cout << "Server key: " << serverDHKey << endl; 
+
         // Derive the shared secret
         EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey, NULL);
         EVP_PKEY_derive_init(ctx_drv);
         if (1 != EVP_PKEY_derive_set_peer(ctx_drv, serverDHKey)) {
+            cout << "Crash here just at start" << endl;
             handleErrors();
         }
         unsigned char* secret;
@@ -525,14 +534,17 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         /* Retrieving shared secret’s length */
         size_t secretlen;
         if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
+            cout << "Crash here in the derive" << endl;
             handleErrors();
         }
         /* Deriving shared secret */
         secret = (unsigned char*)malloc(secretlen);
         if (secret == NULL) {
+            cout << "Secret is null!" << endl;
             handleErrors();
         }
         if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
+            cout << "Crash here in the second derive" << endl;
             handleErrors();
         }
         EVP_PKEY_CTX_free(ctx_drv);
@@ -545,6 +557,8 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
         /* Context allocation */
         digest_ctx = EVP_MD_CTX_new();
+
+        cout << "Before hashing the secret" << endl;
 
         /* Hashing (initialization + single update + finalization */
         EVP_DigestInit(digest_ctx, EVP_sha256());
@@ -560,6 +574,9 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         //     key[i] = digest[i];
         // }
         memcpy(key,digest,16);
+
+        free(secret);
+        free(digest);
 
         cout << "Diffie Hellman secret: " << key << endl;
 
@@ -580,6 +597,8 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key,iv_gcm,12,cphr_buf,tag_buf);
 
         auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
+
+        free(key);
 
         int pos = 0;
     
@@ -783,6 +802,7 @@ bool TcpClient::authenticateServer() {
         return false;
     }
 
+    //TODO: Need to receive the exact bytes of the certificate!! Two consecutive recv
     unsigned char recv_msg[MAX_PACKET_SIZE];
     int numOfBytesReceived = recv(m_sockfd, recv_msg, MAX_PACKET_SIZE, 0);
 
@@ -823,10 +843,63 @@ bool TcpClient::authenticateServer() {
 
     serverRSAKey = server_pubkey;
 
+
+    // Now user need to authenticate himself by digitally sign a message with its own public key
+    string toSend = getClientName() + " user";
+    char *sendMsg = (char*)toSend.c_str(); 
+
+    unsigned char* signature;
+    unsigned int signature_len;
+
+    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
+
+    signature = (unsigned char*)malloc(EVP_PKEY_size(mykey));
+    if (!signature) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
+
+    ret = EVP_SignInit(md_ctx,EVP_sha224());
+    if (ret == 0) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
+    ret = EVP_SignUpdate(md_ctx,(unsigned char*)sendMsg,strlen(sendMsg));
+    if (ret == 0) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
+
+    ret = EVP_SignFinal(md_ctx,signature,&signature_len,mykey);
+    if (ret == 0) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        return false;   
+    }
+
+    EVP_MD_CTX_free(md_ctx);
+    // EVP_PKEY_free(mykey);
+
+    int numBytesSent3 = send(m_sockfd, (char*)signature, strlen((char*)signature), 0);
+
+    if (numBytesSent3 < 0 ) { // send failed
+        cout<<"Error sending the certificate request"<<endl;
+        return false;
+    }
+    if ((uint)numBytesSent3 < signature_len) { // not all bytes were sent
+        cout<<"Error sending the certificare request, not all bytes were sent"<< endl;
+        return false;
+    }
+
+
     // Send public key, authentication using certificates
     // Then symmetric session key negotiation via elliptic curve diffie hellman
     // Now user wait for server public key
     char msg[MAX_PACKET_SIZE];
+    memset(msg,0,MAX_PACKET_SIZE);
     int numOfBytesReceived2 = recv(m_sockfd, msg, MAX_PACKET_SIZE, 0);
 
     cout << "Client, DH pubkey received is: " << msg << endl;
@@ -847,12 +920,11 @@ bool TcpClient::authenticateServer() {
     unsigned char msg2[numOfBytesReceived2];
     strcpy((char*)msg2,msg);
 
+    cout << "Server public key here: " << msg2 << endl; 
+
     // We have to extract the public key from the buffer
     EVP_PKEY* serverDHPubKey = pem_deserialize_pubkey(msg2,numOfBytesReceived2);
     serverDHKey = serverDHPubKey;
-
-    // Now user need to authenticate himself by encrypting the derived shared key with the public RSA key of the server
-    // User will encrypt the hash of the DH shared secret and will encrypt it with server RSA public key.
 
     return true;
 }
@@ -948,12 +1020,12 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
  * Receive server packets, and notify user
  */
 void TcpClient::ReceiveTask() {
-
     // Whenever client thread starts, the first thing client will do is the authentication
     setServerAuthenticated(authenticateServer());
 
     while(!stop) {
         char msg[MAX_PACKET_SIZE];
+        memset(msg,0,MAX_PACKET_SIZE);
         int numOfBytesReceived = recv(m_sockfd, msg, MAX_PACKET_SIZE, 0);
 
         if(numOfBytesReceived < 1) {
@@ -1018,6 +1090,9 @@ void TcpClient::ReceiveTask() {
                 // }
                 memcpy(key,digest,16);
 
+                free(secret);
+                free(digest);
+
                 int pos = 0;
                 // retrieve IV
                 unsigned char iv_gcm[12];
@@ -1046,6 +1121,8 @@ void TcpClient::ReceiveTask() {
                 // Decrypt received message with AES-128 bit GCM
                 int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,12,plaintext_buffer);
                 plaintext_buffer[encrypted_len] = '\0';
+
+                free(key);
                 
                 cout << "Client, message decrypted: " << plaintext_buffer << endl;
 
@@ -1105,6 +1182,9 @@ void TcpClient::ReceiveTask() {
                 //     key[i] = digest[i];
                 // }
                 memcpy(key,digest,16);
+
+                free(secret);
+                free(digest);
 
                 int pos = 0;
                 // retrieve IV

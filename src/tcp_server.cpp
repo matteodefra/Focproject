@@ -226,6 +226,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
     while(client->isConnected()) {
         char msg[MAX_PACKET_SIZE];
+        memset(msg,0,MAX_PACKET_SIZE);
         int numOfBytesReceived = recv(client->getFileDescriptor(), msg, MAX_PACKET_SIZE, 0);
 
         cout << "Bytes received: "<< numOfBytesReceived << endl;
@@ -309,6 +310,8 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     // }
                     memcpy(key,digest,16);
 
+                    free(secret);
+                    free(digest);
 
                     // unsigned char key_gcm[] = "1234567890123456";
 
@@ -339,6 +342,8 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
                     // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
                     int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,12,plaintext_buffer);
+
+                    free(key);
 
                     plaintext_buffer[encrypted_len] = '\0';
 
@@ -495,9 +500,9 @@ string TcpServer::loginClient(Client &client, string message) {
     if(match) response = "Login successful, welcome to the chatting platform!";
         else response = "An error occured, probably we cannot find a match for your credentials, try again.";
 
-    if (match) {
-        client.setClientName(credentials.at(0));
-    }
+    // if (match) {
+    //     client.setClientName(credentials.at(0));
+    // }
 
     return response;
 }
@@ -567,6 +572,8 @@ unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
 
     memcpy(buffer+pos,key,keylen);
 
+    free(key);
+    EVP_PKEY_free(pubkey);
 
     return buffer;
 }
@@ -590,6 +597,11 @@ void setClientPublicKey(Client &client, char *username) {
     }
 
     client.setClientKey(pubkey);
+
+    // !!!!!
+    // EVP_PKEY_free(pubkey);
+
+    fclose(file);
 
     cout << "Set also client public key successfully" << endl;
 }
@@ -641,6 +653,7 @@ pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
 
         //TODO RICAVARE LA CHIAVE PUBBLICA DI TALE CLIENT 
         setClientPublicKey(client,username);
+        client.setClientName(username);
         
         string response = "Client successfully recognize!";
         int numBytesSent = send(client.getFileDescriptor(), response.c_str(), strlen(response.c_str()), 0);
@@ -846,6 +859,10 @@ void TcpServer::loadServerDHKeys() {
 
     fclose(file2);
 
+    // !!!!!
+    // EVP_PKEY_free(pubkey);
+    // EVP_PKEY_free(privkey);
+
 } 
 
 
@@ -863,6 +880,9 @@ pipe_ret_t TcpServer::start(int port) {
     EVP_PKEY *privkey = PEM_read_PrivateKey(file,NULL,NULL,NULL);
     if (!privkey) handleErrors(); 
     setServerPrivKey(privkey);
+
+    // !!!!!
+    EVP_PKEY_free(privkey);
 
     fclose(file);
 
@@ -1074,6 +1094,8 @@ pipe_ret_t TcpServer::sendCertificate(Client & client){
 
     fclose(server_file);
 
+
+    // Double send!!!
     size_t cert_len;
     unsigned char* certificate = pem_serialize_certificate(server_cert,&cert_len);
     cout<<"CERTIFICATE:"<<endl;
@@ -1094,6 +1116,71 @@ pipe_ret_t TcpServer::sendCertificate(Client & client){
     ret.success = true;
     // return ret;
 
+    OPENSSL_free(certificate);
+
+
+    // Now server will receive signature of a message encrypted with client private key. Server will verify 
+    // the authencity through its known public key
+    char signature[MAX_PACKET_SIZE];
+    int numOfBytesReceived = recv(client.getFileDescriptor(), signature, MAX_PACKET_SIZE, 0);
+
+    if(numOfBytesReceived < 1) {
+        client.setDisconnected();
+        if (numOfBytesReceived == 0) { //client closed connection
+            client.setErrorMessage("Client closed connection");
+            //printf("client closed");
+        } else {
+            client.setErrorMessage(strerror(errno));
+        }
+        close(client.getFileDescriptor());
+        publishClientDisconnected(client);
+        deleteClient(client);
+        ret.success = false;
+    }
+    else {
+
+        char *clear_buf = (char*)client.getClientName().c_str();
+        strcat(clear_buf," user");
+        int clear_size = strlen(clear_buf);
+
+        int res;
+        // Verify the signature in the file
+        EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
+        if (!md_ctx) {
+            cout << "ERROR!" << endl;
+            ERR_print_errors_fp(stderr);
+            ret.success = false;
+            return ret;
+        }
+
+        res = EVP_VerifyInit(md_ctx,EVP_sha256());
+        if (res == 0) {
+            cout << "ERROR!" << endl;
+            ERR_print_errors_fp(stderr);
+            ret.success = false;
+            return ret;
+        }
+
+        res = EVP_VerifyUpdate(md_ctx,clear_buf,clear_size);
+        if (res == 0) {
+            cout << "ERROR!" << endl;
+            ERR_print_errors_fp(stderr);
+            ret.success = false;
+            return ret;
+        }
+
+        res = EVP_VerifyFinal(md_ctx,(unsigned char*)signature,numOfBytesReceived,client.getClientKey());
+        if (res == 0) {
+            cout << "ERROR!" << endl;
+            ERR_print_errors_fp(stderr);
+            ret.success = false;
+            return ret;
+        }
+
+        cout << "Signature verified correctly! Client is authorized" << endl;
+    }
+
+
     // Now server will send its public key generated with diffie hellman parameters
     size_t key_len;
     unsigned char* publicKey = pem_serialize_pubkey(getDHPublicKey(),&key_len);
@@ -1112,11 +1199,9 @@ pipe_ret_t TcpServer::sendCertificate(Client & client){
         ret.msg = msg;
         return ret;
     }
-    ret.success = true;
+    ret.success = true; 
 
-    // Now server will wait for client authentication via its RSA public key obtained with the certificate
-    // Client encrypt the hash of the diffie hellman with the RSA pubkey of the server. The server decrypt it
-    // using its private RSA key and verify if the hash correspond
+    free(publicKey);
     
     return ret;
 
@@ -1200,6 +1285,9 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
         // }
         memcpy(key,digest,16);
 
+        free(digest);
+        free(secret);
+
         // Also this first part could be included in a utility function
         unsigned char msg2[size];
         strcpy((char*)msg2,msg);
@@ -1217,6 +1305,8 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
         cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key,iv_gcm,12,cphr_buf,tag_buf);
 
         auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
+
+        free(key);
 
         int pos = 0;
     

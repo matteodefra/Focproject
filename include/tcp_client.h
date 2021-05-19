@@ -51,11 +51,6 @@ private:
     // Client name
     std::string clientName;
 
-    EVP_PKEY *mykey;
-    EVP_PKEY *peerKey;
-    EVP_PKEY *serverRSAKey;
-    EVP_PKEY *serverDHKey;
-
     bool isChatting = false;
     bool isServerAuthenticated = false;
    
@@ -73,7 +68,10 @@ private:
 
 public:
 
-    
+    EVP_PKEY *mykey;
+    EVP_PKEY *peerKey;
+    EVP_PKEY *serverRSAKey;
+    EVP_PKEY *serverDHKey;    
     
     ~TcpClient();
 

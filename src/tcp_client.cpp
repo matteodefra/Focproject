@@ -335,27 +335,50 @@ void TcpClient::saveMyKey() {
 
     // Save into local variable the client private key.
     // The file is stored into ./AddOn/<client_name>/<client_name>
-    string path = "./AddOn/" + name + "/" + name + ".pem"; 
+    string path = "./AddOn/" + name + "/" + name + "RSA.pem"; 
 
-    cout << "Path to priv key: " << path << endl;
+    cout << "Path to priv RSA key: " << path << endl;
  
     FILE *file = fopen(path.c_str(),"r");
     if (!file) handleErrors();
 
-    // OpenSSL_add_all_algorithms();
-
-    // string val;
-
-    // cout << "Waiting for input pass..." << endl;
-    // getline(cin,val);
-
-    // mykey = PEM_read_PrivateKey(file,NULL,(pem_password_cb*)_callback,(void*)val.c_str());
-    mykey = PEM_read_PrivateKey(file,NULL,NULL,NULL);
-    if (!mykey) handleErrors(); 
+    mykey_RSA = PEM_read_PrivateKey(file,NULL,NULL,NULL);
+    if (!mykey_RSA) handleErrors(); 
 
     fclose(file);
 
+    cout<<"mykey_RSA:"<<endl;
+    cout << mykey_RSA << endl;
+
+    string path1 = "./AddOn/" + name + "/" + name + ".pem"; 
+
+    cout << "Path to priv DH key: " << path1 << endl;
+ 
+    FILE *file1 = fopen(path.c_str(),"r");
+    if (!file1) handleErrors();
+
+    mykey = PEM_read_PrivateKey(file1,NULL,NULL,NULL);
+    if (!mykey) handleErrors(); 
+
+    fclose(file1);
+
+    cout<<"mykey:"<<endl;
     cout << mykey << endl;
+
+    string path2 = "./AddOn/" + name + "_pub.pem"; 
+
+    cout << "Path to priv DH key: " << path2 << endl;
+ 
+    FILE *file2 = fopen(path.c_str(),"r");
+    if (!file2) handleErrors();
+
+    mykey_pub = PEM_read_PrivateKey(file2,NULL,NULL,NULL);
+    if (!mykey_pub) handleErrors(); 
+
+    fclose(file2);
+
+    cout<<"mykey_pub:"<<endl;
+    cout << mykey_pub << endl;
 }
 
 
@@ -798,7 +821,7 @@ bool TcpClient::authenticateServer() {
         return false;
     }
     if ((uint)numBytesSent < cert_str.size()) { // not all bytes were sent
-        cout<<"Error sending the certificare request, not all bytes were sent"<<endl;
+        cout<<"Error sending the certificate request, not all bytes were sent"<<endl;
         return false;
     }
 
@@ -853,7 +876,7 @@ bool TcpClient::authenticateServer() {
 
     EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
 
-    signature = (unsigned char*)malloc(EVP_PKEY_size(mykey));
+    signature = (unsigned char*)malloc(EVP_PKEY_size(mykey_RSA));
     if (!signature) {
         cout << "ERROR!" << endl;
         ERR_print_errors_fp(stderr);
@@ -873,7 +896,7 @@ bool TcpClient::authenticateServer() {
         return false;
     }
 
-    ret = EVP_SignFinal(md_ctx,signature,&signature_len,mykey);
+    ret = EVP_SignFinal(md_ctx,signature,&signature_len,mykey_RSA);
     if (ret == 0) {
         cout << "ERROR!" << endl;
         ERR_print_errors_fp(stderr);
@@ -883,14 +906,14 @@ bool TcpClient::authenticateServer() {
     EVP_MD_CTX_free(md_ctx);
     // EVP_PKEY_free(mykey);
 
-    int numBytesSent3 = send(m_sockfd, (char*)signature, strlen((char*)signature), 0);
+    int numBytesSent3 = send(m_sockfd, (char*)signature, signature_len, 0);
 
     if (numBytesSent3 < 0 ) { // send failed
-        cout<<"Error sending the certificate request"<<endl;
+        cout<<"Error sending the signature"<<endl;
         return false;
     }
     if ((uint)numBytesSent3 < signature_len) { // not all bytes were sent
-        cout<<"Error sending the certificare request, not all bytes were sent"<< endl;
+        cout<<"Error sending the signature, not all bytes were sent"<< endl;
         return false;
     }
 
@@ -920,11 +943,31 @@ bool TcpClient::authenticateServer() {
     unsigned char msg2[numOfBytesReceived2];
     strcpy((char*)msg2,msg);
 
-    cout << "Server public key here: " << msg2 << endl; 
+    cout << "Server DH public key here: " << msg2 << endl; 
 
     // We have to extract the public key from the buffer
     EVP_PKEY* serverDHPubKey = pem_deserialize_pubkey(msg2,numOfBytesReceived2);
     serverDHKey = serverDHPubKey;
+
+
+    //SEND DHpubkey to server
+
+    size_t key_len;
+    unsigned char* publicKey = pem_serialize_pubkey(mykey_pub,&key_len);
+
+    cout << "Client DH public key here: " << publicKey << endl;
+
+    cout<<"DH PUBKEY:"<<endl;
+    cout<<publicKey<<endl;
+    int numBytesSent4 = send(m_sockfd, publicKey, key_len, 0);
+    if (numBytesSent4 < 0) { // send failed
+        cout<<"Error sending DH public key"<<endl;
+        return false;
+    }
+    if ((uint)numBytesSent4 < key_len) { // not all bytes were sent
+        cout<<"Error sending DH public key, not all bytes sent"<<endl;
+        return false;
+    }
 
     return true;
 }

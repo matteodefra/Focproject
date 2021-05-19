@@ -68,7 +68,9 @@ private:
 
 public:
 
+    EVP_PKEY *mykey_RSA;
     EVP_PKEY *mykey;
+    EVP_PKEY *mykey_pub;
     EVP_PKEY *peerKey;
     EVP_PKEY *serverRSAKey;
     EVP_PKEY *serverDHKey;    

@@ -6,6 +6,7 @@
 #include <openssl/rand.h>
 #include <openssl/err.h>
 #include <assert.h>
+#include "../include/util.h"
 
 using namespace std;
 
@@ -17,92 +18,11 @@ void helpMsg(){
     cout<<"********************************************************************"<<endl;
     cout<<"LIST OF AVAILABLE COMMANDS:"<<endl;
     cout<<":LIST -> show the list of all connected clients to the server"<<endl;
-    cout<<":REQ x -> send a request to talk to the client with username x"<<endl;
-    cout<<":LOGIN -> log in to the service"<<endl;
+    cout<<":REQ <userPeer> -> send a request to talk to the client with username x"<<endl;
+    cout<<":LOGIN <username> <password> -> log in to the service"<<endl;
+    cout<<":ACCEPT ->  Accept a request-to-talk from a target client"<<endl;
+    cout<<":DENY ->  Deny a request-to-talk from a target client"<<endl;
     cout<<"********************************************************************"<<endl;
-}
-
-/**
- * Utility function to handle OPENSSL errors
- */
-void handleErrors(void)
-{
-    ERR_print_errors_fp(stderr);
-    abort();
-}
-
-
-
-unsigned char *pem_serialize_pubkey(EVP_PKEY *key, size_t *len)
-{
-	assert(key && len);
-	BIO *bio = BIO_new(BIO_s_mem());
-	if (!bio) {
-		handleErrors();
-		return NULL;
-	}
-	if (PEM_write_bio_PUBKEY(bio, key) != 1) {
-		handleErrors();
-		BIO_free(bio);
-		return NULL;
-	}
-	char *buf;
-	*len = BIO_get_mem_data(bio, &buf);
-	if (*len <= 0 || !buf) {
-		handleErrors();
-		BIO_free(bio);
-		return NULL;
-	}
-	unsigned char *pubkey = (unsigned char*)malloc(*len);
-	if (!pubkey)
-		handleErrors();
-	memcpy(pubkey, buf, *len);
-	BIO_free(bio);
-	return pubkey;
-}
-
-EVP_PKEY *pem_deserialize_pubkey(unsigned char *key, size_t len)
-{
-	assert(key);
-	BIO *bio = BIO_new(BIO_s_mem());
-	if (!bio) {
-		handleErrors();
-		return NULL;
-	}
-	if (BIO_write(bio, key, len) != (int)len) {
-		handleErrors();
-		BIO_free(bio);
-		return NULL;
-	}
-	EVP_PKEY *pubkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
-	if (!pubkey)
-		handleErrors();
-	BIO_free(bio);
-	return pubkey;
-}
-
-X509* pem_deserialize_certificate(unsigned char *certificate, size_t len)
-{
-	assert(certificate);
-	BIO *bio = BIO_new(BIO_s_mem());
-	if (!bio) {
-        cout<<"ER0"<<endl;
-		handleErrors();
-		return NULL;
-	}
-	if (BIO_write(bio, certificate, len) != (int)len) {
-        cout<<"ER1"<<endl;
-		handleErrors();
-		BIO_free(bio);
-		return NULL;
-	}
-	X509 *cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
-	if (!cert){
-        cout<<"ER2"<<endl;
-        handleErrors();
-    }
-	BIO_free(bio);
-	return cert;
 }
 
 /**
@@ -113,14 +33,15 @@ X509* pem_deserialize_certificate(unsigned char *certificate, size_t len)
 unsigned char* TcpClient::pswHash(string msg){
 
     char *pointer = strtok((char*)msg.c_str()," ");
-    vector<string> credentials; //at.() = username | at.(1) = password
-    int counter = 0; //used to skip :LOGIN/:REG part
+    vector<string> credentials; //at.(0) = command | at.(1) = password
 
     while (pointer != NULL) { //putting the credentials into vector
-        if(counter != 0) credentials.push_back(pointer);
+        credentials.push_back(pointer);
         pointer = strtok(NULL," "); 
-        counter++;
     }
+
+    cout<<"credentials"<<endl;
+    cout<<credentials.at(1)<<endl;
 
     char* c_msg =(char*)credentials.at(1).c_str();
     const EVP_MD* hash_function = EVP_sha256();
@@ -146,11 +67,13 @@ unsigned char* TcpClient::pswHash(string msg){
  *  Returns 0 if the command has been recognize and not special actions are required
  *  Returns -1 if the command is :HELP
  *  Returns -2 if the command has not been recognized
+ *  Returns -3 if the user command is not well formatted
  *  Return   1 if the command is :LOGIN / :REG (require hashing of the psw)
  * 
  */
 
 int TcpClient::checkCommandValidity(string msg) { 
+
 
     size_t num_blank = count(msg.begin(), msg.end(),' '); //count blankets
 
@@ -161,32 +84,40 @@ int TcpClient::checkCommandValidity(string msg) {
         words.push_back(pointer);
         pointer = strtok(NULL," ");
     }
- 
+
     if(words.size() == 0) return -2;
 
-    if(words.at(0).compare(":LIST")==0 && words.size() == 1 && num_blank == 0) { 
+    if(getAuthSuccess() == false){ //only :USER command can be performed
+        if(words.at(0).compare(":USER") == 0 && words.size() == 2 && num_blank == 1){ ///:USER username
+            return 0;
+        } else {
+            return -3;
+        }
+    } else{
+        if(words.at(0).compare(":LIST")==0 && words.size() == 1 && num_blank == 0) { 
         return 0;
-    }
-    else if(words.at(0).compare(":HELP")==0 && words.size() == 1 && num_blank == 0) {
-        helpMsg(); 
-        return -1;
-    } 
-    else if(words.at(0).compare(":REQ") == 0 && words.size() == 2 && num_blank == 1){ //:REQ username
-        return 0;
-    }
-    else if(words.at(0).compare(":LOGIN") == 0 && words.size() == 3 && num_blank == 2){ //:LOGIN username psw 
-        return 1;
-    }
-    else if(words.at(0).compare(":REG") == 0 && words.size() == 3 && num_blank == 2){ ///:REG username psw
-        return 1;
-    }
-    else if(words.at(0).compare(":ACCEPT") == 0 && words.size() == 1 && num_blank == 0){ ///:ACCEPT
-        return 0;
-    }
-    else if(words.at(0).compare(":USER") == 0 && words.size() == 2 && num_blank == 1){ ///:USER username
-        return 0;
-    }
-     else return -2;
+        }
+        else if(words.at(0).compare(":HELP")==0 && words.size() == 1 && num_blank == 0) {
+            helpMsg(); 
+            return -1;
+        } 
+        else if(words.at(0).compare(":REQ") == 0 && words.size() == 2 && num_blank == 1){ //:REQ username
+            return 0;
+        }
+        else if(words.at(0).compare(":LOGIN") == 0 && words.size() == 2 && num_blank == 1){ //:LOGIN psw 
+            return 1;
+        }
+        else if(words.at(0).compare(":REG") == 0 && words.size() == 3 && num_blank == 2){ ///:REG username psw
+            return 1;
+        }
+        else if(words.at(0).compare(":ACCEPT") == 0 && words.size() == 1 && num_blank == 0){ ///:ACCEPT
+            return 0;
+        }
+         else if(words.at(0).compare(":DENY") == 0 && words.size() == 1 && num_blank == 0){ ///:DENY
+            return 0;
+        }
+        else return -2;
+        }
 }
  
 
@@ -233,83 +164,6 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
     m_receiveTask = new std::thread(&TcpClient::ReceiveTask, this);
     ret.success = true;
     return ret;
-}
-
-
-/**
- * gcm_encrypt: encrypt a message in aes-128 gcm mode
- * 
- * @param plaintext the message to encrypt
- * @param plaintext_len the length of the message to encrypt
- * @param aad additional data to add to the message
- * @param aad_len the length of the additional data portion
- * @param iv the random initialization vector prepend to the message
- * @param iv_len the length of the initialization vector
- * @param ciphertext the pointer to variable where to store the encrypted message
- * @param tag the nonce appended to the message
- * 
- * The function encrypt create a message in AES 128 bit mode GCM, cycling if the message size is 
- * greater than AES block size. Return the length of the encrypted text
- */ 
-int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len, 
-                unsigned char *aad, size_t aad_len, 
-                unsigned char *key,
-                unsigned char *iv, size_t iv_len, 
-                unsigned char *ciphertext, 
-                unsigned char *tag) {
-
-    EVP_CIPHER_CTX *ctx;
-    int len;
-    int ciphertext_len = 0;
-
-    // Create and initialise the context
-    if(!(ctx = EVP_CIPHER_CTX_new())) {
-        std::cout<<" Error in creating the context for encryption"<<std::endl;
-        handleErrors();
-    }
-    // Initialise the encryption operation.
-    if(1 != EVP_EncryptInit(ctx, EVP_aes_128_gcm(), key, iv)) {
-        std::cout<<"Error in Initialising the encryption operation"<<std::endl;
-        handleErrors();
-    }
-    //Provide any AAD data. This can be called zero or more times as required
-    if(1 != EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len)){
-        std::cout<<" Error in providing AAD"<<std::endl;
-        handleErrors();
-    }
-
-
-    while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
-        //cout << "Entra nel loop?" << endl;
-        if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
-            std::cout<<"Error in performing encryption"<<std::endl;
-            handleErrors();
-        }
-        ciphertext_len += len;
-        plaintext_len -= len;
-    }
-
-    if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, plaintext_len)){
-        std::cout<<"Error in performing encryption"<<std::endl;
-        handleErrors();
-    }
-    ciphertext_len += len;
-    
-    //Finalize Encryption
-    if(1 != EVP_EncryptFinal(ctx, ciphertext + ciphertext_len, &len)){
-        std::cout<<"Error in finalizing encryption"<<std::endl;
-        handleErrors();
-    }
-    ciphertext_len += len;
-    /* Get the tag */
-    if(1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag)){
-        std::cout<<"Error in retrieving the tag "<<std::endl;
-        handleErrors();
-    }
-    /* Clean up */
-
-    EVP_CIPHER_CTX_free(ctx);
-    return ciphertext_len;
 }
 
 
@@ -370,11 +224,6 @@ void TcpClient::saveMyKey() {
     FILE *file = fopen(path.c_str(),"r");
     if (!file) handleErrors();
 
-    // cout << "Input password for RSA private key" << endl;
-    // string val;
-    // getline(cin,val);
-
-    // mykey_RSA = PEM_read_PrivateKey(file,NULL,_callback,(void*)val.c_str());
     mykey_RSA = PEM_read_PrivateKey(file,NULL,NULL,NULL);
     if (!mykey_RSA) handleErrors(); 
 
@@ -385,35 +234,7 @@ void TcpClient::saveMyKey() {
 
     generateDHKeypairs();
 
-    // string path1 = "./AddOn/" + name + "/" + name + ".pem"; 
-
-    // cout << "Path to priv DH key: " << path1 << endl;
- 
-    // FILE *file1 = fopen(path1.c_str(),"r");
-    // if (!file1) handleErrors();
-
-    // mykey = PEM_read_PrivateKey(file1,NULL,NULL,NULL);
-    // if (!mykey) handleErrors(); 
-
-    // fclose(file1);
-
-    // cout<<"mykey:"<<endl;
-    // cout << mykey << endl;
-
-    // string path2 = "./AddOn/" + name + "_pub.pem"; 
-
-    // cout << "Path to pub DH key: " << path2 << endl;
- 
-    // FILE *file2 = fopen(path2.c_str(),"r");
-    // if (!file2) handleErrors();
-
-    // mykey_pub = PEM_read_PUBKEY(file2,NULL,NULL,NULL);
-    // if (!mykey_pub) handleErrors(); 
-
-    // fclose(file2);
-
-    // cout<<"mykey_pub:"<<endl;
-    // cout << mykey_pub << endl;
+    return;
 }
 
 
@@ -542,7 +363,6 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 
         // Workaround now to save client name and client public key
         if (strncmp(msg,":USER",5) == 0) {
-            cout << "Entra qui" << endl;
 
             char *copy = (char*) malloc(size);
             strcpy(copy,msg);
@@ -738,36 +558,19 @@ void TcpClient::publishServerDisconnected(const pipe_ret_t & ret) {
     }
 }
 
-bool TcpClient::clientAuthentication(){
+/**
+ * Client send to the server the user command with his username, the server verify if this
+ * username is present in his user's list and if it's the authentication can continue and this function will 
+ * return true; 
+ * 
+ * false will be returned if the user is not present.
+ * 
+ */
+
+bool TcpClient::clientRecognition(){
 
     //Send client msg with username
-    cout<<"Welcome, please enter your username:"<<endl;
-    // size_t num_blank = 1; 
-
-    // string username = "tommy"; //dovrebbe leggerlo da input
-    // /*
-    // while(num_blank != 0){
-    //     getline(cin,username); 
-    //     num_blank = count(username.begin(), username.end(),' '); //count blankets
-    //     if(num_blank != 0) { 
-    //         cout<<"Username can not contain blankets, please retry"<<endl;
-    //     }
-    // }*/
-      
-    // string username_msg = ":USER " + username;
-    // cout<<"USERNAME MSG"<<endl;
-    // cout<<username_msg<<endl;
-
-    // int numBytesSent = send(m_sockfd, (char*)username_msg.c_str(), username_msg.size(), 0);
-
-    // if (numBytesSent < 0 ) { // send failed
-    //     cout<<"Error sending the username"<<endl;
-    //     return false;
-    // }
-    // if ((uint)numBytesSent < username_msg.size()) { // not all bytes were sent
-    //     cout<<"Error sending the username, not all bytes were sent"<<endl;
-    //     return false;
-    // }
+    cout<<"Welcome, please first enter the user command"<<endl;
 
     char recv_msg[MAX_PACKET_SIZE];
     int numOfBytesReceived = recv(m_sockfd, recv_msg, MAX_PACKET_SIZE, 0);
@@ -778,11 +581,11 @@ bool TcpClient::clientAuthentication(){
     }
     string success_msg = "Client successfully recognize!";
     if(strcmp(recv_msg,(char*)success_msg.c_str()) == 0) {
-        cout<<"CLIENT RICONOSCIUTO"<<endl;
+        cout<<"Client has been recognize, he's present in the server's user list "<<endl;
         return true;
     }
         else {
-            cout<<"CLIENT NOT RECOGNIZED!"<<endl;
+            cout<<"Client not recognized"<<endl;
             return false;
         }
 
@@ -802,7 +605,7 @@ bool TcpClient::authenticateServer() {
 
     //Client Authentication
 
-    bool clientAuth = clientAuthentication();
+    bool clientAuth = clientRecognition();
 
     if(clientAuth == false) return false;
 
@@ -845,9 +648,6 @@ bool TcpClient::authenticateServer() {
 
     //Receive Certificate
     string cert_str = ":CERT";
-
-    cout<<"MESSAGGIO INVIATO:"<<endl;
-    cout<<cert_str<<endl;
 
     int numBytesSent = send(m_sockfd, (char*)cert_str.c_str(), cert_str.size(), 0);
 
@@ -1012,99 +812,13 @@ bool TcpClient::authenticateServer() {
     return true;
 }
 
-/**
- * This function will ask server for all connected clients.
- * Need to implement secure communication through symmetric key
- */
-void TcpClient::displayAllClients() {
-    return;
-}
-
-/**
- * Util function to decrypt server message
- * 
- * @param ciphertext the ciphertext to decrypt
- * @param ciphertext_len length of the message to decrypt
- * @param aad additional data to add in the message
- * @param aad_len length of the aad portion
- * @param tag the nonce to append or prepend to the string
- * @param key the secret shared key
- * @param iv the initialization vector contained in the message
- * @param iv_len the length of the iv
- * @param plaintext pointer to the variable where we store the decrypted text
- * 
- * Decrypt the ciphertext and return its length, the buffer of the plaintext is passed as pointer. 
- * If some error occurs, the message is discarded
- */
-int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len, 
-                unsigned char *aad, size_t aad_len, 
-                unsigned char *tag,
-                unsigned char *key, unsigned char *iv, 
-                size_t iv_len, 
-                unsigned char *plaintext) {
-
-    EVP_CIPHER_CTX *ctx;
-    int len;
-    int plaintext_len = 0;
-
-    // Create and initialise the context
-    if(!(ctx = EVP_CIPHER_CTX_new())) {
-        std::cout<<" Error in creating the context for encryption"<<std::endl;
-        handleErrors();
-    }
-    // Initialise the encryption operation.
-    if(1 != EVP_DecryptInit(ctx, EVP_aes_128_gcm(), key, iv)) {
-        std::cout<<"Error in Initialising the encryption operation"<<std::endl;
-        handleErrors();
-    }
-    //Provide any AAD data. This can be called zero or more times as required
-    if(1 != EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len)){
-        std::cout<<" Error in providing AAD"<<std::endl;
-        handleErrors();
-    }
-
-    // Needed for comparison between size_t and integer
-    while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
-        //cout << "Entra nel loop?" << endl;
-        if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
-            std::cout<<"Error in performing encryption"<<std::endl;
-            handleErrors();
-        }
-        plaintext_len += len;
-        ciphertext_len -= len;
-    }
-
-    if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, ciphertext_len)){
-        std::cout<<"Error in performing encryption"<<std::endl;
-        handleErrors();
-    }
-    plaintext_len += len;
-
-    /* Get the tag */
-    if(1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, tag)){
-        std::cout<<"Error in retrieving the tag "<<std::endl;
-        handleErrors();
-    }
-
-    //Finalize Encryption
-    if(1 != EVP_DecryptFinal(ctx, plaintext + plaintext_len, &len)){
-        std::cout<<"Error in finalizing encryption"<<std::endl;
-        handleErrors();
-    }
-    plaintext_len += len;
-    
-    /* Clean up */
-    EVP_CIPHER_CTX_free(ctx);
-    return plaintext_len;
-}
-
 
 /*
  * Receive server packets, and notify user
  */
 void TcpClient::ReceiveTask() {
     // Whenever client thread starts, the first thing client will do is the authentication
-    setServerAuthenticated(authenticateServer());
+    setAuthSuccess(authenticateServer());
 
     while(!stop) {
         char msg[MAX_PACKET_SIZE];

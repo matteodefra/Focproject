@@ -1,7 +1,3 @@
-//
-// Created by erauper on 4/7/19.
-//
-
 #ifndef INTERCOM_TCP_CLIENT_H
 #define INTERCOM_TCP_CLIENT_H
 
@@ -24,7 +20,6 @@
 #include "client_observer.h"
 #include "pipe_ret_t.h"
 #include <openssl/pem.h>
-#include "util.h"
 
 using namespace std;
 
@@ -52,8 +47,7 @@ private:
     std::string clientName;
 
     bool isChatting = false;
-    bool isServerAuthenticated = false;
-   
+    bool AuthSuccess = false;
 
     // Client will also have a private key protected by a password
 
@@ -90,10 +84,7 @@ public:
 
     // Function must be called at client start in order to authenticate the server, verifying its certificate
     bool authenticateServer();
-    bool clientAuthentication();
-
-    // Display all clients connected 
-    void displayAllClients();
+    bool clientRecognition();
 
     // To subscribe client, publish 
     void subscribe(const client_observer_t & observer);
@@ -105,8 +96,8 @@ public:
     bool getChatting() { return isChatting; }
     void setChatting() { isChatting = true; }
 
-    bool getServerAuthenticated() { return isServerAuthenticated; }
-    void setServerAuthenticated(bool x) { isServerAuthenticated = x; }
+    bool getAuthSuccess() { return AuthSuccess; }
+    void setAuthSuccess(bool x) { AuthSuccess = x; }
 
     void setClientName(std::string name) { clientName = name; }
     string getClientName() { return clientName; }

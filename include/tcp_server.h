@@ -21,7 +21,6 @@
 #include "client.h"
 #include "server_observer.h"
 #include "pipe_ret_t.h"
-#include "util.h"
 #include <openssl/evp.h>
 
 using namespace std;

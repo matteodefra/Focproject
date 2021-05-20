@@ -42,6 +42,14 @@ private:
     // Authentication flag
     bool m_isAuthenticated = false;
 
+    // Pending request
+
+    bool m_hasRequest = false;
+
+    // Logged
+
+    bool m_isLogged = false;
+
     // Handler thread for the client thread 
     std::thread * m_threadHandler = nullptr;
 
@@ -66,6 +74,13 @@ public:
     void setDisconnected() { m_isConnected = false; }
     bool isConnected() { return m_isConnected; }
 
+
+    // Login
+
+    void setLogged() { m_isLogged = true; }
+    void resetLogged() { m_isLogged = false; }
+    bool isLogged() { return m_isLogged; }
+
     // Will be managed by server, to reject or accept the "request to talk"
     void setChatting() { m_isChatting = true; }
     void setNotChatting() { m_isChatting = false; }
@@ -75,6 +90,12 @@ public:
     void setAuthenticated() { m_isAuthenticated = true; }
     void setNotAuthenticated() { m_isAuthenticated = false; }
     bool isAuthenticated() { return m_isAuthenticated; }
+
+    //Will be managed by server, to reject or accept the "request to talk"
+    void setRequest() { m_hasRequest = true; }
+    void resetRequest() { m_hasRequest = false; }
+    bool hasRequest() { return m_hasRequest; }
+    
 
     // Methods to set and get shared secret between server and client
     void setServerClientSharedKey();

@@ -5,6 +5,7 @@
 #include <openssl/err.h>
 #include <fstream>
 #include <assert.h>
+#include "../include/util.h"
 
 using namespace std;
 
@@ -89,171 +90,6 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
     return ret;
 }
 
-/**
- * Utility function to handle OPENSSL errors
- */
-void handleErrors(void)
-{
-    ERR_print_errors_fp(stderr);
-    abort();
-}
-
-unsigned char *pem_serialize_certificate(X509 *cert, size_t *len)
-{
-	assert(cert && len);
-	BIO *bio = BIO_new(BIO_s_mem());
-	if (!bio) {
-		handleErrors();
-		return NULL;
-	}
-	if (PEM_write_bio_X509(bio, cert) != 1) {
-		handleErrors();
-		BIO_free(bio);
-		return NULL;
-	}
-	char *buf;
-	*len = BIO_get_mem_data(bio, &buf);
-	if (*len <= 0 || !buf) {
-		handleErrors();
-		BIO_free(bio);
-		return NULL;
-	}
-	unsigned char *certificate = (unsigned char*)malloc(*len);
-	if (!certificate)
-		handleErrors();
-	memcpy(certificate, buf, *len);
-	BIO_free(bio);
-	return certificate;
-}
-
-
-unsigned char *pem_serialize_pubkey(EVP_PKEY *key, size_t *len)
-{
-	assert(key && len);
-	BIO *bio = BIO_new(BIO_s_mem());
-	if (!bio) {
-		handleErrors();
-		return NULL;
-	}
-	if (PEM_write_bio_PUBKEY(bio, key) != 1) {
-		handleErrors();
-		BIO_free(bio);
-		return NULL;
-	}
-	char *buf;
-	*len = BIO_get_mem_data(bio, &buf);
-	if (*len <= 0 || !buf) {
-		handleErrors();
-		BIO_free(bio);
-		return NULL;
-	}
-	unsigned char *pubkey = (unsigned char*)malloc(*len);
-	if (!pubkey)
-		handleErrors();
-	memcpy(pubkey, buf, *len);
-	BIO_free(bio);
-	return pubkey;
-}
-
-EVP_PKEY *pem_deserialize_pubkey(unsigned char *key, size_t len)
-{
-	assert(key);
-	BIO *bio = BIO_new(BIO_s_mem());
-	if (!bio) {
-		handleErrors();
-		return NULL;
-	}
-	if (BIO_write(bio, key, len) != (int)len) {
-		handleErrors();
-		BIO_free(bio);
-		return NULL;
-	}
-	EVP_PKEY *pubkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
-	if (!pubkey)
-		handleErrors();
-	BIO_free(bio);
-	return pubkey;
-}
-
-/**
- * Util function to decrypt server message
- * 
- * @param ciphertext the ciphertext to decrypt
- * @param ciphertext_len length of the message to decrypt
- * @param aad additional data to add in the message
- * @param aad_len length of the aad portion
- * @param tag the nonce to append or prepend to the string
- * @param key the secret shared key
- * @param iv the initialization vector contained in the message
- * @param iv_len the length of the iv
- * @param plaintext pointer to the variable where we store the decrypted text
- * 
- * Decrypt the ciphertext and return its length, the buffer of the plaintext is passed as pointer. 
- * If some error occurs, the message is discarded
- */
-int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len, 
-                unsigned char *aad, size_t aad_len, 
-                unsigned char *tag,
-                unsigned char *key, unsigned char *iv, 
-                size_t iv_len, 
-                unsigned char *plaintext) {
-
-    EVP_CIPHER_CTX *ctx;
-    int len;
-    int plaintext_len = 0;
-
-    // Create and initialise the context
-    if(!(ctx = EVP_CIPHER_CTX_new())) {
-        std::cout<<" Error in creating the context for encryption"<<std::endl;
-        handleErrors();
-    }
-    // Initialise the encryption operation.
-    if(1 != EVP_DecryptInit(ctx, EVP_aes_128_gcm(), key, iv)) {
-        std::cout<<"Error in Initialising the encryption operation"<<std::endl;
-        handleErrors();
-    }
-    //Provide any AAD data. This can be called zero or more times as required
-    if(1 != EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len)){
-        std::cout<<" Error in providing AAD"<<std::endl;
-        handleErrors();
-    }
-
-
-    while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
-        //cout << "Entra nel loop?" << endl;
-        if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
-            std::cout<<"Error in performing encryption"<<std::endl;
-            handleErrors();
-        }
-        plaintext_len += len;
-        ciphertext_len -= len;
-    }
-
-    if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, ciphertext_len)){
-        std::cout<<"Error in performing encryption"<<std::endl;
-        handleErrors();
-    }
-    plaintext_len += len;
-
-    /* Get the tag */
-    if(1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, tag)){
-        std::cout<<"Error in retrieving the tag "<<std::endl;
-        handleErrors();
-    }
-
-    //Finalize Encryption
-    if(1 != EVP_DecryptFinal(ctx, plaintext + plaintext_len, &len)){
-        std::cout<<"Error in finalizing encryption"<<std::endl;
-        handleErrors();
-    }
-    plaintext_len += len;
-    
-    /* Clean up */
-    EVP_CIPHER_CTX_free(ctx);
-    return plaintext_len;
-}
-
-
 /*
  * Receive client packets, and notify user
  */
@@ -295,10 +131,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             }
         
             else {
-                cout<<"msg:"<<endl;
-                cout<<msg<<endl;
                 if(strncmp(msg,":USER",5) == 0){ //These msg are sent in clear during the authentication phase
-                    cout << "Enter here? " << msg << endl;
                     processRequest(*client,msg);
                 } 
                 else{
@@ -423,7 +256,7 @@ Client& TcpServer::sendRequest(Client &client, string message) {
     pointer = strtok(NULL," ");
     // Now pointer contains the name of the answerer
     for (auto&s : m_clients) {
-        if (strcmp(s.getClientName().c_str(),pointer)==0) {
+        if (strcmp(s.getClientName().c_str(),pointer)==0 && s.isLogged()) {
             // Found answerer
             // Create message and send response
             return s;
@@ -501,24 +334,26 @@ string TcpServer::regClient(Client &client, string message) {
 }
 
 /**
- * return true if the pair is present, false otherwise
+ * return 0 if the pair is present
+ * return 1 if an error occurs during the login
+ * return 2 if the pair is not present
  */
 
-bool checkLogin(string username, string psw){
+int checkLogin(string username, string psw){
 
     ifstream myfile;
     myfile.open ("./AddOn/users.txt");
     if (!myfile.is_open()) {
       cout<<"ERROR: File open"<<endl;
-      return false;
+      return 1;
     }
     string user, password;
     while (myfile >> user >> password){
-        if(user.compare(username) == 0 && password.compare(psw) == 0) return true; 
+        if(user.compare(username) == 0 && password.compare(psw) == 0) return 0; 
     }   
     myfile.close();
 
-    return false;
+    return 2;
 }
 
 
@@ -526,8 +361,12 @@ bool checkLogin(string username, string psw){
  * Login function: memorize client name and send back an OK ack in order to manage list of connected clients
  */
 string TcpServer::loginClient(Client &client, string message) {
+
+    cout<<"sono nella login"<<endl;
     char *pointer = strtok((char*)message.c_str()," ");
     vector<string> credentials; //at.() = username | at.(1) = password
+
+    credentials.push_back(client.getClientName());
     int counter = 0;
 
     while (pointer != NULL) { //putting the credentials into vector
@@ -536,14 +375,26 @@ string TcpServer::loginClient(Client &client, string message) {
         counter++;
     }
 
-    bool match = checkLogin(credentials.at(0),credentials.at(1));
-    string response;
-    if(match) response = "Login successful, welcome to the chatting platform!";
-        else response = "An error occured, probably we cannot find a match for your credentials, try again.";
+    cout<<"Cred"<<endl;
+    cout<<credentials.at(0)<<endl;
+    cout<<credentials.at(1)<<endl;
+    
 
-    // if (match) {
-    //     client.setClientName(credentials.at(0));
-    // }
+    int ret_code = checkLogin(credentials.at(0),credentials.at(1));
+    string response;
+    
+    switch(ret_code){
+        case 0: 
+            response = "Login successful, welcome to the chatting platform!";
+            client.setLogged();
+            break;
+        case 1: 
+            response = "An error occurred during the login phase, please try again later";
+            break;
+        case 2: 
+            response = "We cant find an user with that credentials, try a different username or password";
+            break;
+    }
 
     return response;
 }
@@ -557,8 +408,10 @@ string TcpServer::createList(Client &client, string message) {
     string allClients;
     allClients = "[";
     for (auto&s : m_clients) {
+        if(s.isLogged()){
         string clientName = s.getClientName();
         allClients = allClients + " " + clientName;
+        }
     }
     allClients = allClients + " ]";
     
@@ -725,87 +578,100 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
     pipe_ret_t ret;
 
     if (strncmp(request.c_str(),":LIST",5) == 0) {
-        if (!client.isAuthenticated()) {
-            // Cannot start normal flow until authentication is estabilished
+        if (!client.isLogged()) {
+            string response = "You must be logged before issuing this command";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        } else{
+            string clientsList = createList(client,request);
+            ret = sendToClient(client,clientsList.c_str(),strlen(clientsList.c_str()));
         }
-        string clientsList = createList(client,request);
-        ret = sendToClient(client,clientsList.c_str(),strlen(clientsList.c_str()));
     }
     else if (strncmp(request.c_str(),":REQ",4) == 0) {
-        if (!client.isConnected()) {
+        if (!client.isLogged()) {
             // Cannot start a request-to-talk until a login is provided
-        }
-        if (!client.isAuthenticated()) {
-            // Cannot start normal flow until authentication is estabilished
-        }
-        if (client.isChatting()) {
-            // Cannot instantiate a Request to Talk if are already talking
-        }
-
-        Client& receivingClient = sendRequest(client,request);
-        if (receivingClient == client) {
-            // Client is not connected or not logged
-            string response = "Client not connected or not logged";
+            string response = "You must be logged before issuing this command";
             ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        } else{
+            Client& receivingClient = sendRequest(client,request);
+            if (receivingClient == client) {
+                // Client is not connected or not logged
+                string response = "Client not connected or not logged";
+                ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+            }
+            else {
+                // Client is connected: send message
+                string response = "Request-to-talk from " + client.getClientName() + "; Do you want to accept?";
+                storeRequestingInfo(receivingClient,client);
+                ret = sendToClient(receivingClient,response.c_str(),strlen(response.c_str()));
+                receivingClient.setRequest();
+            }
         }
-        else {
-            // Client is connected: send message
-            string response = "Request-to-talk from " + client.getClientName() + "; Do you want to accept?";
-            storeRequestingInfo(receivingClient,client);
-            ret = sendToClient(receivingClient,response.c_str(),strlen(response.c_str()));
-        }
+       
     }
     else if (strncmp(request.c_str(),":LOGIN",6) == 0) {
-        if (!client.isAuthenticated()) {
-            // Cannot start normal flow until authentication is estabilished
-        }
         // A must function: each client must furnish a login name
         string response = loginClient(client,request);
         ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
     }
     else if (strncmp(request.c_str(),":REG",4) == 0) {
-        if (!client.isAuthenticated()) {
-            // Cannot start normal flow until authentication is estabilished
-        }
         string response = regClient(client,request);
         ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
     }
-    else if (strncmp(request.c_str(),":ACCEPT",7) ==0 ) {
-        // Recover the requesting client from the receiver client istance, and forward the ACCEPT message
-        Client &requestingClient = getClient(client);
-        if (requestingClient == client) {
-            // The requesting client probably disconnected
-            string response = "The requesting client is disconnected";
+    else if (strncmp(request.c_str(),":DENY",5) == 0) {
+        if (!client.isLogged()) {
+            // Cannot start a request-to-talk until a login is provided
+            string response = "You must be logged before issuing this command";
             ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        } 
+        else if (!client.hasRequest()){
+            string response = "You dont have any pending request.";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        } else {
+            Client &requestingClient = getClient(client);
+            if (requestingClient == client) {
+                // The requesting client probably disconnected
+                string response = "The requesting client is disconnected";
+                ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+            } else{
+                client.resetRequest();
+                string response = "Request denied";
+                ret = sendToClient(requestingClient,(char*)response.c_str(),strlen(response.c_str()));
+            }
         }
-        else {
-            
-            unsigned char *messageOne = recoverKey(requestingClient,client);
-            unsigned char *messageTwo = recoverKey(client,requestingClient);
-            storeRequestingInfo(requestingClient,client);
+    }
+    else if (strncmp(request.c_str(),":ACCEPT",7) ==0 ) {
+        if (!client.isLogged()) {
+            // Cannot start a request-to-talk until a login is provided
+            string response = "You must be logged before issuing this command";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        } 
+        else if (!client.hasRequest()){
+            string response = "You dont have any pending request.";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        } else {
+            Client &requestingClient = getClient(client);
+            if (requestingClient == client) {
+                // The requesting client probably disconnected
+                string response = "The requesting client is disconnected";
+                ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+            }
+            else {
+                
+                unsigned char *messageOne = recoverKey(requestingClient,client);
+                unsigned char *messageTwo = recoverKey(client,requestingClient);
+                storeRequestingInfo(requestingClient,client);
 
-            cout << "Message one: " << messageOne << endl;
-            cout << "Message two: " << messageTwo << endl;
+                cout << "Message one: " << messageOne << endl;
+                cout << "Message two: " << messageTwo << endl;
 
-            ret = sendToClient(requestingClient,(char*)messageOne,strlen((char*)messageOne));
-            ret = sendToClient(client,(char*)messageTwo,strlen((char*)messageTwo));
+                ret = sendToClient(requestingClient,(char*)messageOne,strlen((char*)messageOne));
+                ret = sendToClient(client,(char*)messageTwo,strlen((char*)messageTwo));
+                client.resetRequest();
+            }
         }
     }
     else if (strncmp(request.c_str(),":USER",5) == 0 ) {
         ret = authenticationStart(client,request);
-    }
-    else if (strncmp(request.c_str(),":DENY",5) ==0 ) {
-        // Recover the requesting client from the receiver client istance, and forward the DENY message
-        Client requestingClient = getClient(client);
-        if (requestingClient == client) {
-            // The requesting client probably disconnected
-            string response = "The requesting client is disconnected";
-            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
-        }
-        else {
-            // Simply forward the ":DENY to the requesting client"
-            ret = sendToClient(requestingClient,request.c_str(),strlen(request.c_str()));
-        }
     }
     else {
         string response = "Message format not recognized, type :HELP to get more information";
@@ -1051,83 +917,6 @@ pipe_ret_t TcpServer::sendToAllClients(const char * msg, size_t size) {
     }
     ret.success = true;
     return ret;
-}
-
-
-/**
- * gcm_encrypt: encrypt a message in aes-128 gcm mode
- * 
- * @param plaintext the message to encrypt
- * @param plaintext_len the length of the message to encrypt
- * @param aad additional data to add to the message
- * @param aad_len the length of the additional data portion
- * @param iv the random initialization vector prepend to the message
- * @param iv_len the length of the initialization vector
- * @param ciphertext the pointer to variable where to store the encrypted message
- * @param tag the nonce appended to the message
- * 
- * The function encrypt create a message in AES 128 bit mode GCM, cycling if the message size is 
- * greater than AES block size. Return the length of the encrypted text
- */ 
-int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len, 
-                unsigned char *aad, size_t aad_len, 
-                unsigned char *key,
-                unsigned char *iv, size_t iv_len, 
-                unsigned char *ciphertext, 
-                unsigned char *tag) {
-
-    EVP_CIPHER_CTX *ctx;
-    int len;
-    int ciphertext_len = 0;
-
-    // Create and initialise the context
-    if(!(ctx = EVP_CIPHER_CTX_new())) {
-        std::cout<<" Error in creating the context for encryption"<<std::endl;
-        handleErrors();
-    }
-    // Initialise the encryption operation.
-    if(1 != EVP_EncryptInit(ctx, EVP_aes_128_gcm(), key, iv)) {
-        std::cout<<"Error in Initialising the encryption operation"<<std::endl;
-        handleErrors();
-    }
-    //Provide any AAD data. This can be called zero or more times as required
-    if(1 != EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len)){
-        std::cout<<" Error in providing AAD"<<std::endl;
-        handleErrors();
-    }
-
-
-    while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
-        //cout << "Entra nel loop?" << endl;
-        if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
-            std::cout<<"Error in performing encryption"<<std::endl;
-            handleErrors();
-        }
-        ciphertext_len += len;
-        plaintext_len -= len;
-    }
-
-    if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, plaintext_len)){
-        std::cout<<"Error in performing encryption"<<std::endl;
-        handleErrors();
-    }
-    ciphertext_len += len;
-    
-    //Finalize Encryption
-    if(1 != EVP_EncryptFinal(ctx, ciphertext + ciphertext_len, &len)){
-        std::cout<<"Error in finalizing encryption"<<std::endl;
-        handleErrors();
-    }
-    ciphertext_len += len;
-    /* Get the tag */
-    if(1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag)){
-        std::cout<<"Error in retrieving the tag "<<std::endl;
-        handleErrors();
-    }
-    /* Clean up */
-
-    EVP_CIPHER_CTX_free(ctx);
-    return ciphertext_len;
 }
 
 pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client){

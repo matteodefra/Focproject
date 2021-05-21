@@ -68,11 +68,11 @@ public:
     // authentication of the server)
     Client acceptClient(uint timeout);
 
-    //
+    // Setter and getter for the server RSA private key
     void setServerPrivKey(EVP_PKEY *privKey) { serverPrivKey = privKey; }
     EVP_PKEY* getServerPrivKey() { return serverPrivKey; }
 
-    //
+    // Setter and getter for the server Diffie Hellman public key
     void setServerDHPubKey(EVP_PKEY* publicKey) {
         serverDHPubKey = publicKey;
     }

@@ -90,6 +90,8 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
     return ret;
 }
 
+
+
 /*
  * Receive client packets, and notify user
  */
@@ -137,89 +139,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                 else{
                     cout << "Server, starting decryption settings..." << endl;
 
-                    // Derive the shared secret
-                    EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(getDHPublicKey(), NULL);
-                    EVP_PKEY_derive_init(ctx_drv);
-                    if (1 != EVP_PKEY_derive_set_peer(ctx_drv, client->getClientKeyDH())) {
-                        handleErrors();
-                    }
-                    unsigned char* secret;
-
-                    /* Retrieving shared secret’s length */
-                    size_t secretlen;
-                    if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
-                        handleErrors();
-                    }
-                    /* Deriving shared secret */
-                    secret = (unsigned char*)malloc(secretlen);
-                    if (secret == NULL) {
-                        handleErrors();
-                    }
-                    if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
-                        handleErrors();
-                    }
-                    EVP_PKEY_CTX_free(ctx_drv);
-
-                    // We need to derive the hash of the shared secret now
-                    unsigned char* digest;
-                    unsigned int digestlen;
-                    EVP_MD_CTX* digest_ctx;
-                    /* Buffer allocation for the digest */
-                    digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
-                    /* Context allocation */
-                    digest_ctx = EVP_MD_CTX_new();
-
-                    /* Hashing (initialization + single update + finalization */
-                    EVP_DigestInit(digest_ctx, EVP_sha256());
-                    EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
-                    EVP_DigestFinal(digest_ctx, digest, &digestlen);
-                    /* Context deallocation */
-                    EVP_MD_CTX_free(digest_ctx);
-
-                    // Taking first 128 bits of the digest
-                    // Get first 16 bytes of shared secret, to use as key in AES
-                    unsigned char *key = (unsigned char*)malloc(16);
-                    // for (int i =0; i<16; i++) {
-                    //     key[i] = digest[i];
-                    // }
-                    memcpy(key,digest,16);
-
-                    free(secret);
-                    free(digest);
-
-                    // unsigned char key_gcm[] = "1234567890123456";
-
-                    int pos = 0;
-                    // retrieve IV
-                    unsigned char iv_gcm[12];
-                    memcpy(iv_gcm,msg+pos,12);
-                    pos += 12;
-
-                    // retrieve AAD
-                    unsigned char AAD[12];
-                    memcpy(AAD, msg+pos,12);
-                    pos += 12;
-
-                    // retrieve encrypted data
-                    size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
-                    unsigned char encryptedData[encrypted_len];
-                    memcpy(encryptedData,msg+pos,encrypted_len);
-                    pos += encrypted_len;
-
-                    // retrieve tag
-                    size_t tag_len = 16;
-                    unsigned char tag[tag_len];
-                    memcpy(tag, msg+pos, tag_len);
-                    pos += tag_len;
-
-                    unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
-
-                    // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
-                    int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,12,plaintext_buffer);
-
-                    free(key);
-
-                    plaintext_buffer[encrypted_len] = '\0';
+                    unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH());
 
                     cout << "Server, decrypted message: " << plaintext_buffer << endl;
 
@@ -333,12 +253,12 @@ string TcpServer::regClient(Client &client, string message) {
 
 }
 
+
 /**
  * return 0 if the pair is present
  * return 1 if an error occurs during the login
  * return 2 if the pair is not present
  */
-
 int checkLogin(string username, string psw){
 
     ifstream myfile;
@@ -408,13 +328,18 @@ string TcpServer::createList(Client &client, string message) {
     string allClients;
     allClients = "[";
     for (auto&s : m_clients) {
-        if(s.isLogged()){
-        string clientName = s.getClientName();
-        allClients = allClients + " " + clientName;
+        if(s.isLogged()) {
+            string clientName = s.getClientName();
+            allClients = allClients + " " + clientName + ",";
         }
     }
-    allClients = allClients + " ]";
-    
+    if (allClients == "[") {
+        allClients = allClients + "]";        
+    }
+    else {
+        allClients.pop_back();
+        allClients = allClients + " ]";   
+    }
     return allClients;
 }
 
@@ -456,7 +381,6 @@ unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
     memcpy(buffer+pos,key,keylen);
 
     free(key);
-    // EVP_PKEY_free(pubkey);
 
     return buffer;
 }
@@ -484,9 +408,6 @@ void setClientPublicKey(Client &client, char *username) {
     client.setClientKeyRSA(pubkey);
 
     cout << "Client pubkey: " << client.getClientKeyRSA() << endl;
-
-    // !!!!!
-    // EVP_PKEY_free(pubkey);
 
     fclose(file);
 
@@ -734,6 +655,7 @@ void TcpServer::publishClientDisconnected(Client & client) {
     }
 }
 
+
 /**
  * 
  */ 
@@ -763,30 +685,6 @@ void TcpServer::loadServerDHKeys() {
     EVP_PKEY_CTX_free(ctx);
 
     setServerDHPubKey(my_pubkey);
-
-    // string path1 = "./AddOn/serverDHkey.pem"; 
-    // FILE *file1 = fopen(path1.c_str(),"r");
-    // if (!file1) handleErrors();
-
-    // EVP_PKEY *privkey = PEM_read_PrivateKey(file1,NULL,NULL,NULL);
-    // if (!privkey) handleErrors(); 
-
-    // fclose(file1);
-
-    // string path2 = "./AddOn/serverDHpubkey.pem"; 
-    // FILE *file2 = fopen(path2.c_str(),"r");
-    // if (!file2) handleErrors();
-
-    // EVP_PKEY *pubkey = PEM_read_PUBKEY(file2,NULL,NULL,NULL);
-    // if (!pubkey) handleErrors(); 
-
-    // setServerDHkeypair(privkey,pubkey);
-
-    // fclose(file2);
-
-    // !!!!!
-    // EVP_PKEY_free(pubkey);
-    // EVP_PKEY_free(privkey);
 
 } 
 
@@ -1136,102 +1034,13 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
         cout << "Server pub key: " << getDHPublicKey() << endl;
         cout << "Client pub key: " << client.getClientKeyDH() << endl;
 
-        // Derive the shared secret
-        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(getDHPublicKey(), NULL);
-        EVP_PKEY_derive_init(ctx_drv);
-        if (1 != EVP_PKEY_derive_set_peer(ctx_drv, client.getClientKeyDH())) {
-            handleErrors();
-        }
-        unsigned char* secret;
-
-        /* Retrieving shared secret’s length */
-        size_t secretlen;
-        if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
-            handleErrors();
-        }
-        /* Deriving shared secret */
-        secret = (unsigned char*)malloc(secretlen);
-        if (secret == NULL) {
-            handleErrors();
-        }
-        if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
-            handleErrors();
-        }
-        EVP_PKEY_CTX_free(ctx_drv);
-
-        // We need to derive the hash of the shared secret now
-        unsigned char* digest;
-        unsigned int digestlen;
-        EVP_MD_CTX* digest_ctx;
-        /* Buffer allocation for the digest */
-        digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
-        /* Context allocation */
-        digest_ctx = EVP_MD_CTX_new();
-
-        /* Hashing (initialization + single update + finalization */
-        EVP_DigestInit(digest_ctx, EVP_sha256());
-        EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
-        EVP_DigestFinal(digest_ctx, digest, &digestlen);
-        /* Context deallocation */
-        EVP_MD_CTX_free(digest_ctx);
-
-        // Taking first 128 bits of the digest
-        // Get first 16 bytes of shared secret, to use as key in AES
-        unsigned char *key = (unsigned char*)malloc(16);
-        // for (int i =0; i<16; i++) {
-        //     key[i] = digest[i];
-        // }
-        memcpy(key,digest,16);
-
-        free(digest);
-        free(secret);
-
-        // Also this first part could be included in a utility function
-        unsigned char msg2[size];
-        strcpy((char*)msg2,msg);
-
-        // unsigned char key_gcm[] = "1234567890123456";
-        unsigned char iv_gcm[] = "123456780912";
-        unsigned char *cphr_buf;
-        unsigned char *tag_buf;
-        int cphr_len;
-        int tag_len;
-        int pt_len = strlen(msg);
-
-        cphr_buf = (unsigned char*)malloc(size);
-        tag_buf = (unsigned char*)malloc(16);
-        cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key,iv_gcm,12,cphr_buf,tag_buf);
-
-        auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
-
-        free(key);
-
-        int pos = 0;
-    
-        // copy iv
-        memcpy(buffer+pos, iv_gcm, 12);
-        pos += 12;
-        // delete [] iv_gcm;
-
-        //copio aad
-        memcpy((buffer+pos), iv_gcm, 12);
-        pos += 12;
-
-        //copio encrypted
-        memcpy((buffer+pos), cphr_buf, cphr_len);
-        pos += pt_len;
-        delete[] cphr_buf;
-
-        //copio tag
-        memcpy((buffer+pos), tag_buf, 16);
-        pos += 16;
-        delete [] tag_buf;
+        auto* buffer = deriveAndEncryptMessage(msg,size,getDHPublicKey(),client.getClientKeyDH());
 
         cout << "Server, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
         cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
 
-        int numBytesSent = send(client.getFileDescriptor(), buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
+        int numBytesSent = send(client.getFileDescriptor(), buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
         if (numBytesSent < 0) { // send failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -1251,19 +1060,6 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
     
 }
 
-/**
- * Send the request to talk to the other party
- */
-// pipe_ret_t TcpServer::communicateRequest(const Client & client, const char * msg, size_t size){
-//     Get Client object instance from username
-//     Client c = getClient(std::string username);
-//     return;
-// }
-/**
- * Use digital envelope
- */ 
-
-
 /*
  * Close server and clients resources.
  * Return true is success, false otherwise
@@ -1272,7 +1068,7 @@ pipe_ret_t TcpServer::finish() {
     pipe_ret_t ret;
     for (uint i=0; i<m_clients.size(); i++) {
         m_clients[i].setDisconnected();
-        OPENSSL_free(m_clients[i].getClientKeyDH());
+        EVP_PKEY_free(m_clients[i].getClientKeyDH());
         if (close(m_clients[i].getFileDescriptor()) == -1) { // close failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -1285,56 +1081,8 @@ pipe_ret_t TcpServer::finish() {
         return ret;
     }
     m_clients.clear();
-    OPENSSL_free(serverPrivKey);
-    OPENSSL_free(serverDHPubKey);
-    OPENSSL_free(serverDHPubKey);
+    EVP_PKEY_free(getServerPrivKey());
+    EVP_PKEY_free(getDHPublicKey());
     ret.success = true;
     return ret;
-}
-
-
-/**
- * This function will be called each time the server need to create a DH key pair 
- * in order to connect with another client (maybe not since a unique public key can be used)
- */
-EVP_PKEY* generatePubkey() {
-
-    EVP_PKEY* dh_params;
-    DH* tmp = get_dh2048();
-    dh_params = EVP_PKEY_new();
-    // Loading the dh parameters into dhparams structure
-    int res = EVP_PKEY_set1_DH(dh_params,tmp);
-    DH_free(tmp);
-
-    if (res == 0) {
-        std::cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
-        return 0;
-    }
-
-    // Creating public key for the user
-    std::string pubkey_filename;
-
-    cout << "Generating public key, please insert file name: ";
-    getline(cin,pubkey_filename);
-
-    // Generation of the public key
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(dh_params, NULL);
-    EVP_PKEY* my_pubkey = NULL;
-    EVP_PKEY_keygen_init(ctx);
-    if (EVP_PKEY_keygen(ctx, &my_pubkey)!=1) {
-        cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
-        return 0;
-    }
-
-    FILE *fp_my_pubkey = fopen(pubkey_filename.c_str(),"wx");
-
-    // Saving pubkey to file
-    if (PEM_write_PUBKEY(fp_my_pubkey,my_pubkey) != 1) {
-        cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
-        return 0;
-    }
-    fclose(fp_my_pubkey);
-
-
-
 }

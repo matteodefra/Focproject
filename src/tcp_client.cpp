@@ -19,7 +19,7 @@ void helpMsg(){
     cout<<"LIST OF AVAILABLE COMMANDS:"<<endl;
     cout<<":LIST -> show the list of all connected clients to the server"<<endl;
     cout<<":REQ <userPeer> -> send a request to talk to the client with username x"<<endl;
-    cout<<":LOGIN <username> <password> -> log in to the service"<<endl;
+    cout<<":LOGIN <password> -> log in to the service"<<endl;
     cout<<":ACCEPT ->  Accept a request-to-talk from a target client"<<endl;
     cout<<":DENY ->  Deny a request-to-talk from a target client"<<endl;
     cout<<"********************************************************************"<<endl;
@@ -179,7 +179,6 @@ static int _callback(char *buf, int max_len, int flag, void *ctx)
         return 0;
 
     memcpy(buf, PASSWD, len+1);
-    OPENSSL_clear_free(PASSWD,len);
     return len;
 }
 
@@ -194,7 +193,8 @@ int TcpClient::generateDHKeypairs() {
     DH_free(tmp);
 
     if (res == 0) {
-        cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
+        finish();
+        handleErrors();
         return 0;
     }
 
@@ -224,7 +224,12 @@ void TcpClient::saveMyKey() {
     FILE *file = fopen(path.c_str(),"r");
     if (!file) handleErrors();
 
-    mykey_RSA = PEM_read_PrivateKey(file,NULL,NULL,NULL);
+    // Ask client password in order to read the private key
+    string val;
+    cout << "Please type your password to get RSA private key:" << endl;
+    getline(cin,val);
+
+    mykey_RSA = PEM_read_PrivateKey(file,NULL,_callback,(void*)val.c_str());
     if (!mykey_RSA) handleErrors(); 
 
     fclose(file);
@@ -247,101 +252,15 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 
     if (getChatting()) {
         // Derive the shared secret
-        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey_pub, NULL);
-        EVP_PKEY_derive_init(ctx_drv);
-        if (1 != EVP_PKEY_derive_set_peer(ctx_drv, peerKey)) {
-            handleErrors();
-        }
-        unsigned char* secret;
 
-        /* Retrieving shared secret’s length */
-        size_t secretlen;
-        if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
-            handleErrors();
-        }
-        /* Deriving shared secret */
-        secret = (unsigned char*)malloc(secretlen);
-        if (secret == NULL) {
-            handleErrors();
-        }
-        if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
-            handleErrors();
-        }
-        EVP_PKEY_CTX_free(ctx_drv);
-
-        // We need to derive the hash of the shared secret now
-        unsigned char* digest;
-        unsigned int digestlen;
-        EVP_MD_CTX* digest_ctx;
-        /* Buffer allocation for the digest */
-        digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
-        /* Context allocation */
-        digest_ctx = EVP_MD_CTX_new();
-
-        /* Hashing (initialization + single update + finalization */
-        EVP_DigestInit(digest_ctx, EVP_sha256());
-        EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
-        EVP_DigestFinal(digest_ctx, digest, &digestlen);
-        /* Context deallocation */
-        EVP_MD_CTX_free(digest_ctx);
-
-        // Taking first 128 bits of the digest
-        // Get first 16 bytes of shared secret, to use as key in AES
-        unsigned char *key = (unsigned char*)malloc(16);
-        // for (int i =0; i<16; i++) {
-        //     key[i] = digest[i];
-        // }
-        memcpy(key,digest,16);
-
-        free(secret);
-        free(digest);
-
-        // Also this section could be moved in an utility function
-        unsigned char msg2[size];
-        strcpy((char*)msg2,msg);
-
-        unsigned char iv_gcm[] = "123456780912";
-        unsigned char *cphr_buf;
-        unsigned char *tag_buf;
-        int cphr_len;
-        int tag_len;
-        int pt_len = strlen(msg);
-
-        cphr_buf = (unsigned char*)malloc(size);
-        tag_buf = (unsigned char*)malloc(16);
-        cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key,iv_gcm,12,cphr_buf,tag_buf);
-
-        auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
-
-        free(key);
-
-        int pos = 0;
-    
-        // copy iv
-        memcpy(buffer+pos, iv_gcm, 12);
-        pos += 12;
-        // delete [] iv_gcm;
-
-        // copy aad
-        memcpy((buffer+pos), iv_gcm, 12);
-        pos += 12;
-
-        // copy encrypted data
-        memcpy((buffer+pos), cphr_buf, cphr_len);
-        pos += pt_len;
-        delete[] cphr_buf;
-
-        // copy tag
-        memcpy((buffer+pos), tag_buf, 16);
-        pos += 16;
-        delete [] tag_buf;
+        auto *buffer = deriveAndEncryptMessage(msg,size,mykey_pub,peerKey);
 
         cout << "Client, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
         cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
 
         // Change name accordingly
-        int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
+        int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
         if (numBytesSent < 0 ) { // send failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -400,111 +319,15 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         // cout << "My key: " << mykey << endl;
         cout << "Server key: " << serverDHKey << endl; 
 
-        // Derive the shared secret
-        EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey_pub, NULL);
-        EVP_PKEY_derive_init(ctx_drv);
-        if (1 != EVP_PKEY_derive_set_peer(ctx_drv, serverDHKey)) {
-            cout << "Crash here just at start" << endl;
-            handleErrors();
-        }
-        unsigned char* secret;
 
-        /* Retrieving shared secret’s length */
-        size_t secretlen;
-        if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
-            cout << "Crash here in the derive" << endl;
-            handleErrors();
-        }
-        /* Deriving shared secret */
-        secret = (unsigned char*)malloc(secretlen);
-        if (secret == NULL) {
-            cout << "Secret is null!" << endl;
-            handleErrors();
-        }
-        if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
-            cout << "Crash here in the second derive" << endl;
-            handleErrors();
-        }
-        EVP_PKEY_CTX_free(ctx_drv);
-
-        // We need to derive the hash of the shared secret now
-        unsigned char* digest;
-        unsigned int digestlen;
-        EVP_MD_CTX* digest_ctx;
-        /* Buffer allocation for the digest */
-        digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
-        /* Context allocation */
-        digest_ctx = EVP_MD_CTX_new();
-
-        cout << "Before hashing the secret" << endl;
-
-        /* Hashing (initialization + single update + finalization */
-        EVP_DigestInit(digest_ctx, EVP_sha256());
-        EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
-        EVP_DigestFinal(digest_ctx, digest, &digestlen);
-        /* Context deallocation */
-        EVP_MD_CTX_free(digest_ctx);
-
-        // Taking first 128 bits of the digest
-        // Get first 16 bytes of shared secret, to use as key in AES
-        unsigned char *key = (unsigned char*)malloc(16);
-        // for (int i =0; i<16; i++) {
-        //     key[i] = digest[i];
-        // }
-        memcpy(key,digest,16);
-
-        free(secret);
-        free(digest);
-
-        cout << "Diffie Hellman secret: " << key << endl;
-
-        // Also this section could be moved in an utility function
-        unsigned char msg2[size];
-        strcpy((char*)msg2,msg);
-
-        // unsigned char key_gcm[] = "1234567890123456";
-        unsigned char iv_gcm[] = "123456780912";
-        unsigned char *cphr_buf;
-        unsigned char *tag_buf;
-        int cphr_len;
-        int tag_len;
-        int pt_len = strlen(msg);
-
-        cphr_buf = (unsigned char*)malloc(size);
-        tag_buf = (unsigned char*)malloc(16);
-        cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key,iv_gcm,12,cphr_buf,tag_buf);
-
-        auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/];
-
-        free(key);
-
-        int pos = 0;
-    
-        // copy iv
-        memcpy(buffer+pos, iv_gcm, 12);
-        pos += 12;
-        // delete [] iv_gcm;
-
-        // copy aad
-        memcpy((buffer+pos), iv_gcm, 12);
-        pos += 12;
-
-        // copy encrypted data
-        memcpy((buffer+pos), cphr_buf, cphr_len);
-        pos += pt_len;
-        delete[] cphr_buf;
-
-        // copy tag
-        memcpy((buffer+pos), tag_buf, 16);
-        pos += 16;
-        delete [] tag_buf;
+        auto *buffer = deriveAndEncryptMessage(msg,size,mykey_pub,serverDHKey);
 
         cout << "Client, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
         cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
 
         // Change name accordingly
-        int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+pt_len+16/*tag_len*/+12/*iv_len*/, 0);
+        int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
         if (numBytesSent < 0 ) { // send failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -840,86 +663,8 @@ void TcpClient::ReceiveTask() {
         } else {
 
             if (getChatting()) {
-                // Derive the shared secret
-                EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey_pub, NULL);
-                EVP_PKEY_derive_init(ctx_drv);
-                if (1 != EVP_PKEY_derive_set_peer(ctx_drv, peerKey)) {
-                    handleErrors();
-                }
-                unsigned char* secret;
 
-                /* Retrieving shared secret’s length */
-                size_t secretlen;
-                if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
-                    handleErrors();
-                }
-                /* Deriving shared secret */
-                secret = (unsigned char*)malloc(secretlen);
-                if (secret == NULL) {
-                    handleErrors();
-                }
-                if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
-                    handleErrors();
-                }
-                EVP_PKEY_CTX_free(ctx_drv);
-
-                // We need to derive the hash of the shared secret now
-                unsigned char* digest;
-                unsigned int digestlen;
-                EVP_MD_CTX* digest_ctx;
-                /* Buffer allocation for the digest */
-                digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
-                /* Context allocation */
-                digest_ctx = EVP_MD_CTX_new();
-
-                /* Hashing (initialization + single update + finalization */
-                EVP_DigestInit(digest_ctx, EVP_sha256());
-                EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
-                EVP_DigestFinal(digest_ctx, digest, &digestlen);
-                /* Context deallocation */
-                EVP_MD_CTX_free(digest_ctx);
-
-                // Taking first 128 bits of the digest
-                // Get first 16 bytes of shared secret, to use as key in AES
-                unsigned char *key = (unsigned char*)malloc(16);
-                // for (int i =0; i<16; i++) {
-                //     key[i] = digest[i];
-                // }
-                memcpy(key,digest,16);
-
-                free(secret);
-                free(digest);
-
-                int pos = 0;
-                // retrieve IV
-                unsigned char iv_gcm[12];
-                memcpy(iv_gcm,msg+pos,12);
-                pos += 12;
-
-                // retrieve AAD
-                unsigned char AAD[12];
-                memcpy(AAD, msg+pos,12);
-                pos += 12;
-
-                // retrieve encrypted data
-                size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
-                unsigned char encryptedData[encrypted_len];
-                memcpy(encryptedData,msg+pos,encrypted_len);
-                pos += encrypted_len;
-
-                // retrieve tag
-                size_t tag_len = 16;
-                unsigned char tag[tag_len];
-                memcpy(tag, msg+pos, tag_len);
-                pos += tag_len;
-
-                unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
-
-                // Decrypt received message with AES-128 bit GCM
-                int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,12,plaintext_buffer);
-                plaintext_buffer[encrypted_len] = '\0';
-
-                free(key);
+                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,peerKey);
                 
                 cout << "Client, message decrypted: " << plaintext_buffer << endl;
 
@@ -932,86 +677,9 @@ void TcpClient::ReceiveTask() {
                 // Also this part could be included in a utility function returning only the decrypted message
 
                 cout << "Client: start decryption process..." << endl;
-
-                // Derive the shared secret
-                EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(mykey_pub, NULL);
-                EVP_PKEY_derive_init(ctx_drv);
-                if (1 != EVP_PKEY_derive_set_peer(ctx_drv, serverDHKey)) {
-                    handleErrors();
-                }
-                unsigned char* secret;
-
-                /* Retrieving shared secret’s length */
-                size_t secretlen;
-                if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
-                    handleErrors();
-                }
-                /* Deriving shared secret */
-                secret = (unsigned char*)malloc(secretlen);
-                if (secret == NULL) {
-                    handleErrors();
-                }
-                if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
-                    handleErrors();
-                }
-                EVP_PKEY_CTX_free(ctx_drv);
-
-                // We need to derive the hash of the shared secret now
-                unsigned char* digest;
-                unsigned int digestlen;
-                EVP_MD_CTX* digest_ctx;
-                /* Buffer allocation for the digest */
-                digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
-                /* Context allocation */
-                digest_ctx = EVP_MD_CTX_new();
-
-                /* Hashing (initialization + single update + finalization */
-                EVP_DigestInit(digest_ctx, EVP_sha256());
-                EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
-                EVP_DigestFinal(digest_ctx, digest, &digestlen);
-                /* Context deallocation */
-                EVP_MD_CTX_free(digest_ctx);
-
-                // Taking first 128 bits of the digest
-                // Get first 16 bytes of shared secret, to use as key in AES
-                unsigned char *key = (unsigned char*)malloc(16);
-                // for (int i =0; i<16; i++) {
-                //     key[i] = digest[i];
-                // }
-                memcpy(key,digest,16);
-
-                free(secret);
-                free(digest);
-
-                int pos = 0;
-                // retrieve IV
-                unsigned char iv_gcm[12];
-                memcpy(iv_gcm,msg+pos,12);
-                pos += 12;
-
-                // retrieve AAD
-                unsigned char AAD[12];
-                memcpy(AAD, msg+pos,12);
-                pos += 12;
-
-                // retrieve encrypted data
-                size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
-                unsigned char encryptedData[encrypted_len];
-                memcpy(encryptedData,msg+pos,encrypted_len);
-                pos += encrypted_len;
-
-                // retrieve tag
-                size_t tag_len = 16;
-                unsigned char tag[tag_len];
-                memcpy(tag, msg+pos, tag_len);
-                pos += tag_len;
-
-                unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
-
-                // Decrypt received message with AES-128 bit GCM
-                int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,12,plaintext_buffer);
-                plaintext_buffer[encrypted_len] = '\0';
                 
+                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,serverDHKey);
+
                 cout << "Client, message decrypted: " << plaintext_buffer << endl;
 
                 // Based on message received, we need to perform some action
@@ -1026,19 +694,6 @@ void TcpClient::ReceiveTask() {
 void TcpClient::setAndStorePeerKey(unsigned char* key) {
     // Set peerkey istance inside TcpClient
     peerKey = pem_deserialize_pubkey(key,strlen((char*)key));
-
-    // Save key into file. The peer public key is saved into folder
-    // AddOn/<client_name>/peer.pem
-    // string path = "./AddOn/" + clientName + "/peer.pem";
-    // FILE *file = fopen(path.c_str(),"w");
-    // if (!file) {
-    //     handleErrors();
-    // }
-
-    // int res = PEM_write_PUBKEY(file,peerKey);
-    // if (!res) {
-    //     handleErrors();
-    // }
 }
 
 void TcpClient::processRequest(unsigned char* plaintext_buffer) {
@@ -1064,9 +719,9 @@ void TcpClient::processRequest(unsigned char* plaintext_buffer) {
 pipe_ret_t TcpClient::finish(){
     stop = true;
     terminateReceiveThread();
-    // OPENSSL_free(mykey);
-    OPENSSL_free(serverDHKey);
-    OPENSSL_free(serverRSAKey);
+    EVP_PKEY_free(mykey_RSA);
+    EVP_PKEY_free(serverDHKey);
+    EVP_PKEY_free(serverRSAKey);
     pipe_ret_t ret;
     if (close(m_sockfd) == -1) { // close failed
         ret.success = false;

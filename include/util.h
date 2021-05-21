@@ -13,6 +13,9 @@
 
 using namespace std;
 
+
+#define IV_LEN EVP_CIPHER_iv_length(EVP_aes_128_gcm())
+
 /**
  * Utility function to handle OPENSSL errors
  */
@@ -340,5 +343,221 @@ static DH *get_dh2048(void)
     }
     return dh;
 }
+
+
+
+/**************** DERIVE SECRET AND ENCRYPT/DECRYPT MESSAGE *************/
+
+/**
+ * Function deriveAndEncryptMessage
+ * 
+ * @param msg the message to be encrypted
+ * @param size the size of the corresponding message
+ * @param myPublicKey pointer to the diffie hellman public key of the sending party
+ * @param partyPublicKey pointer to the diffie hellman public key of the receiver party
+ * 
+ * This function compute the Diffie Hellman shared secret starting from the given public keys. Then the message is encrypted 
+ * using AES in gcm mode, via the function gcm_encrypt(). It returns a pointer to the encrypted ciphertext buffer, if some error 
+ * occur it returns a nullptr object
+ */ 
+unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* myPublicKey, EVP_PKEY* partyPublicKey) {
+
+    EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(myPublicKey, NULL);
+    EVP_PKEY_derive_init(ctx_drv);
+    if (1 != EVP_PKEY_derive_set_peer(ctx_drv, partyPublicKey)) {
+        handleErrors();
+    }
+    unsigned char* secret;
+
+    /* Retrieving shared secret’s length */
+    size_t secretlen;
+    if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
+        handleErrors();
+    }
+    /* Deriving shared secret */
+    secret = (unsigned char*)malloc(secretlen);
+    if (secret == NULL) {
+        handleErrors();
+    }
+    if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
+        handleErrors();
+    }
+    EVP_PKEY_CTX_free(ctx_drv);
+
+    // We need to derive the hash of the shared secret now
+    unsigned char* digest;
+    unsigned int digestlen;
+    EVP_MD_CTX* digest_ctx;
+    /* Buffer allocation for the digest */
+    digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
+    /* Context allocation */
+    digest_ctx = EVP_MD_CTX_new();
+
+    /* Hashing (initialization + single update + finalization */
+    EVP_DigestInit(digest_ctx, EVP_sha256());
+    EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
+    EVP_DigestFinal(digest_ctx, digest, &digestlen);
+    /* Context deallocation */
+    EVP_MD_CTX_free(digest_ctx);
+
+    // Taking first 128 bits of the digest
+    // Get first 16 bytes of shared secret, to use as key in AES
+    unsigned char *key = (unsigned char*)malloc(16);
+    memcpy(key,digest,16);
+
+    free(secret);
+    free(digest);
+
+    // Also this section could be moved in an utility function
+    unsigned char msg2[size];
+    strcpy((char*)msg2,msg);
+
+    unsigned char iv_gcm[IV_LEN];
+
+    RAND_poll();
+    int res = RAND_bytes(iv_gcm,IV_LEN);
+    if (res != 1) {
+        cout << "Core dumped here" << endl;
+        // handleErrors();
+        return nullptr;
+    }
+
+    unsigned char *cphr_buf;
+    unsigned char *tag_buf;
+    int cphr_len;
+    int tag_len;
+    int pt_len = strlen(msg);
+
+    cphr_buf = (unsigned char*)malloc(size);
+    tag_buf = (unsigned char*)malloc(16);
+    cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
+
+    auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
+
+    free(key);
+
+    int pos = 0;
+
+    // copy iv
+    memcpy(buffer+pos, iv_gcm, IV_LEN);
+    pos += IV_LEN;
+    // delete [] iv_gcm;
+
+    // copy aad
+    memcpy((buffer+pos), iv_gcm, 12);
+    pos += 12;
+
+    // copy encrypted data
+    memcpy((buffer+pos), cphr_buf, cphr_len);
+    pos += pt_len;
+    delete[] cphr_buf;
+
+    // copy tag
+    memcpy((buffer+pos), tag_buf, 16);
+    pos += 16;
+    delete [] tag_buf;
+
+    return buffer;
+
+}
+
+
+/**
+ * Function deriveAndDecryptMessage
+ * 
+ * @param msg the message to be decrypted
+ * @param numOfBytesReceived the size of the corresponding message
+ * @param myPublicKey pointer to the diffie hellman public key of the sending party
+ * @param partyPublicKey pointer to the diffie hellman public key of the receiver party
+ * 
+ * This function compute the Diffie Hellman shared secret starting from the given public keys. Then the message is decrypted 
+ * using AES in gcm mode, via the function gcm_decrypt(). It returns a pointer to the decrypted plaintext buffer, if some error 
+ * occur it returns a nullptr object
+ */ 
+unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY* myPublicKey, EVP_PKEY *partyPublicKey) {
+
+    // Derive the shared secret
+    EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(myPublicKey, NULL);
+    EVP_PKEY_derive_init(ctx_drv);
+    if (1 != EVP_PKEY_derive_set_peer(ctx_drv, partyPublicKey)) {
+        handleErrors();
+    }
+    unsigned char* secret;
+
+    /* Retrieving shared secret’s length */
+    size_t secretlen;
+    if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
+        handleErrors();
+    }
+    /* Deriving shared secret */
+    secret = (unsigned char*)malloc(secretlen);
+    if (secret == NULL) {
+        handleErrors();
+    }
+    if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
+        handleErrors();
+    }
+    EVP_PKEY_CTX_free(ctx_drv);
+
+    // We need to derive the hash of the shared secret now
+    unsigned char* digest;
+    unsigned int digestlen;
+    EVP_MD_CTX* digest_ctx;
+    /* Buffer allocation for the digest */
+    digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
+    /* Context allocation */
+    digest_ctx = EVP_MD_CTX_new();
+
+    /* Hashing (initialization + single update + finalization */
+    EVP_DigestInit(digest_ctx, EVP_sha256());
+    EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
+    EVP_DigestFinal(digest_ctx, digest, &digestlen);
+    /* Context deallocation */
+    EVP_MD_CTX_free(digest_ctx);
+
+    // Taking first 128 bits of the digest
+    // Get first 16 bytes of shared secret, to use as key in AES
+    unsigned char *key = (unsigned char*)malloc(16);
+    memcpy(key,digest,16);
+
+    free(secret);
+    free(digest);
+
+    int pos = 0;
+    // retrieve IV
+    unsigned char iv_gcm[IV_LEN];
+    memcpy(iv_gcm,msg+pos,IV_LEN);
+    pos += IV_LEN;
+
+    // retrieve AAD
+    unsigned char AAD[12];
+    memcpy(AAD, msg+pos,12);
+    pos += 12;
+
+    // retrieve encrypted data
+    size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
+    unsigned char encryptedData[encrypted_len];
+    memcpy(encryptedData,msg+pos,encrypted_len);
+    pos += encrypted_len;
+
+    // retrieve tag
+    size_t tag_len = 16;
+    unsigned char tag[tag_len];
+    memcpy(tag, msg+pos, tag_len);
+    pos += tag_len;
+
+    unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
+
+    // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
+    int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
+
+    free(key);
+
+    plaintext_buffer[encrypted_len] = '\0';
+
+    return plaintext_buffer;
+
+}
+
 
 #endif

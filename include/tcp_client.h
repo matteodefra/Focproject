@@ -62,10 +62,15 @@ private:
 
 public:
 
+    // My RSA private key
     EVP_PKEY *mykey_RSA;
+    // My DH publick key
     EVP_PKEY *mykey_pub;
+    // Peer DH public key (REQ)
     EVP_PKEY *peerKey;
+    // Server RSA public key
     EVP_PKEY *serverRSAKey;
+    // Server DH public key
     EVP_PKEY *serverDHKey;    
     
     ~TcpClient();
@@ -81,6 +86,12 @@ public:
     int checkCommandValidity(string msg);
 
     unsigned char* pswHash(string msg);
+
+    //
+    // unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* party_key);
+
+    // //
+    // unsigned char* deriveAndDecryptMessage(const char *msg);
 
     // Function must be called at client start in order to authenticate the server, verifying its certificate
     bool authenticateServer();

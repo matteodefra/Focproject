@@ -50,6 +50,10 @@ private:
 
     bool m_isLogged = false;
 
+    // Admin
+
+    bool m_isAdmin = false;
+
     // Handler thread for the client thread 
     std::thread * m_threadHandler = nullptr;
 
@@ -96,6 +100,11 @@ public:
     void resetRequest() { m_hasRequest = false; }
     bool hasRequest() { return m_hasRequest; }
     
+
+    //ADMIN
+    void setAdmin() { m_isAdmin = true; }
+    void resetAdmin() { m_isAdmin = false; }
+    bool isAdmin() { return m_isAdmin; }
 
     // Methods to set and get shared secret between server and client
     void setServerClientSharedKey();

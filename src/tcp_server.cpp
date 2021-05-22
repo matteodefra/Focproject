@@ -28,12 +28,12 @@ void TcpServer::unsubscribeAll() {
  */
 void TcpServer::printClients() {
     for (uint i=0; i<m_clients.size(); i++) {
-        std::string connected = m_clients[i].isConnected() ? "True" : "False";
-        std::cout << "-----------------\n" <<
+        string connected = m_clients[i].isConnected() ? "True" : "False";
+        cout << "-----------------\n" <<
                   "IP address: " << m_clients[i].getIp() << std::endl <<
                   "Connected?: " << connected << std::endl <<
-                  "Socket FD: " << m_clients[i].getFileDescriptor() << std::endl <<
-                  "Message: " << m_clients[i].getInfoMessage().c_str() << std::endl;
+                  "Socket FD: " << m_clients[i].getFileDescriptor() << std::endl;
+        cout<<"-----------------"<<endl;
     }
 }
 
@@ -68,7 +68,7 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
         return ret;
     }
 
-    cout<<cert_req_msg<<endl;
+    cout<<"Certificate Request received."<<endl;
 
     ret = sendCertificate(client);
     if(ret.success == false) return ret;
@@ -84,7 +84,8 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
 
     // send certificate
     // negotiate elliptic curve diffie hellman key
-    cout<<"Authentication completed, DH keys exchanged"<<endl;
+    cout<<"Authentication completed, DH keys exchanged successfully."<<endl;
+    cout<<endl;
     ret.msg = "Authentication completed, DH keys exchanged";
     ret.success = true;
     return ret;
@@ -108,8 +109,6 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
         memset(msg,0,MAX_PACKET_SIZE);
         int numOfBytesReceived = recv(client->getFileDescriptor(), msg, MAX_PACKET_SIZE, 0);
 
-        cout << "Bytes received: "<< numOfBytesReceived << endl;
-
         if(numOfBytesReceived < 1) {
             client->setDisconnected();
             if (numOfBytesReceived == 0) { //client closed connection
@@ -123,10 +122,13 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             deleteClient(*client);
             break;
         } else {
+            cout<<"-----------------"<<endl;
+            cout<<"Message received from client"<<endl;
 
             if (client->isChatting()) {
                 // Client send the message to the other party
                 // Get the client socket from the client istance and forward it
+                cout<<"Forwarding message to the other client . . ."<<endl;
                 Client &receiver = getClient(*client);
 
                 sendToClient(receiver,msg,numOfBytesReceived);
@@ -137,11 +139,10 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     processRequest(*client,msg);
                 } 
                 else{
-                    cout << "Server, starting decryption settings..." << endl;
 
                     unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH());
 
-                    cout << "Server, decrypted message: " << plaintext_buffer << endl;
+                    cout << "<" << client->getClientName() <<"> " << plaintext_buffer << endl;
 
                     // Process client request 
                     processRequest(*client,(char*)plaintext_buffer);
@@ -282,7 +283,6 @@ int checkLogin(string username, string psw){
  */
 string TcpServer::loginClient(Client &client, string message) {
 
-    cout<<"sono nella login"<<endl;
     char *pointer = strtok((char*)message.c_str()," ");
     vector<string> credentials; //at.() = username | at.(1) = password
 
@@ -293,12 +293,7 @@ string TcpServer::loginClient(Client &client, string message) {
         if(counter != 0) credentials.push_back(pointer);
         pointer = strtok(NULL," "); 
         counter++;
-    }
-
-    cout<<"Cred"<<endl;
-    cout<<credentials.at(0)<<endl;
-    cout<<credentials.at(1)<<endl;
-    
+    }    
 
     int ret_code = checkLogin(credentials.at(0),credentials.at(1));
     string response;
@@ -402,12 +397,10 @@ void setClientPublicKey(Client &client, char *username) {
     if (!pubkey) {
         handleErrors();
     }
-
+    cout << "Retrieving the RSA client public key, already known" << endl;
     cout << "Pubkey retrieved: " << pubkey << endl;
 
     client.setClientKeyRSA(pubkey);
-
-    cout << "Client pubkey: " << client.getClientKeyRSA() << endl;
 
     fclose(file);
 
@@ -420,9 +413,10 @@ void setClientPublicKey(Client &client, char *username) {
  */
 
 pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
-
-    cout<<"MSG:"<<endl;
-    cout<<msg<<endl;
+    
+    cout<<"Message received: "<<msg<<endl;
+    cout<<"-----------------"<<endl;
+    cout<<"Looking for the user in the database . . ."<<endl;
 
     pipe_ret_t ret;
 
@@ -438,10 +432,6 @@ pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
     }
 
     username = (char*)words.at(1).c_str();
-
-    cout<<"USERNAME:"<<endl;
-    cout<<username<<endl;
-
 
     ifstream myfile;
     myfile.open ("./AddOn/users.txt");
@@ -459,9 +449,12 @@ pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
 
     if(found){
 
+
+        cout<<"User successfully found."<<endl;
         //TODO RICAVARE LA CHIAVE PUBBLICA DI TALE CLIENT 
         setClientPublicKey(client,username);
         client.setClientName(username);
+        if(strcmp(username,"admin") == 0) client.setAdmin();
         
         string response = "Client successfully recognize!";
         int numBytesSent = send(client.getFileDescriptor(), response.c_str(), strlen(response.c_str()), 0);
@@ -495,6 +488,9 @@ pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
  */
 void TcpServer::processRequest(Client &client,string decryptedMessage) {
     string request = decryptedMessage;
+
+    cout<<"-----------------"<<endl;
+    cout<<"Sending the response . . ."<<endl;
     
     pipe_ret_t ret;
 
@@ -535,8 +531,20 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
         ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
     }
     else if (strncmp(request.c_str(),":REG",4) == 0) {
-        string response = regClient(client,request);
-        ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+
+         if (!client.isLogged()) {
+            // Cannot start a request-to-talk until a login is provided
+            string response = "You must be logged before issuing this command";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        } else if(!client.isAdmin()){
+            //this command can be performed only if the client is an admin
+            string response = "This action can be performed only by an administrator";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        } else{ 
+            string response = regClient(client,request);
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        }
+
     }
     else if (strncmp(request.c_str(),":DENY",5) == 0) {
         if (!client.isLogged()) {
@@ -577,13 +585,19 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
                 ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
             }
             else {
+
+                cout<<"Exchanging the keys between the two clients . . ."<<endl;
                 
                 unsigned char *messageOne = recoverKey(requestingClient,client);
                 unsigned char *messageTwo = recoverKey(client,requestingClient);
                 storeRequestingInfo(requestingClient,client);
 
-                cout << "Message one: " << messageOne << endl;
-                cout << "Message two: " << messageTwo << endl;
+                cout << "First message to send: " <<endl;
+                cout<<messageOne;
+                cout<<"-----------------"<<endl;
+                cout << "Second message to send" << endl;
+                cout << messageTwo;
+                cout<<"-----------------"<<endl;
 
                 ret = sendToClient(requestingClient,(char*)messageOne,strlen((char*)messageOne));
                 ret = sendToClient(client,(char*)messageTwo,strlen((char*)messageTwo));
@@ -824,13 +838,17 @@ pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client){
     unsigned char pubkey_dh[MAX_PACKET_SIZE];
     int numOfBytesReceived = recv(client.getFileDescriptor(), pubkey_dh, MAX_PACKET_SIZE, 0);;
 
+    cout<<"Receiving client DH pubkey . . ."<<endl;
+
     if(numOfBytesReceived < 1) {
         ret.msg = "Error receinving the certificate request";
         ret.success = false;
         return ret;
     }
 
-    cout << "Client DH public key here: " << pubkey_dh << endl; 
+    cout << "Client DH pubkey: " << endl;
+    cout<< pubkey_dh; 
+    cout<<"-----------------"<<endl;
 
     EVP_PKEY* pubkeyDH = pem_deserialize_pubkey(pubkey_dh,numOfBytesReceived);
     client.setClientKeyDH(pubkeyDH);
@@ -850,15 +868,12 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
     memset(signature,0,MAX_PACKET_SIZE);
     int numOfBytesReceived = recv(client.getFileDescriptor(), signature, MAX_PACKET_SIZE, 0);
 
-    cout << "Signature received: " << signature << endl;
-
-    cout << "Bytes received " << numOfBytesReceived << endl;
+    cout << "Signature received." << endl;
 
     if(numOfBytesReceived < 1) {
         client.setDisconnected();
         if (numOfBytesReceived == 0) { //client closed connection
             client.setErrorMessage("Client closed connection");
-            //printf("client closed");
         } else {
             client.setErrorMessage(strerror(errno));
         }
@@ -908,7 +923,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
             return ret;
         }
 
-        cout << "Signature verified correctly! Client is authorized" << endl;
+        cout << "Signature verified correctly! Client is authorized." << endl;
         ret.success = true;
         return ret;
     }
@@ -920,12 +935,15 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client){
 
     pipe_ret_t ret;
 
+    cout<<"Sending Server DH public key to client . . ."<<endl;
+
     
     // Now server will send its public key generated with diffie hellman parameters
     size_t key_len;
     unsigned char* publicKey = pem_serialize_pubkey(getDHPublicKey(),&key_len);
-    cout<<"DH PUBKEY:"<<endl;
-    cout<<publicKey<<endl;
+    cout<<"Server DH pubkey:"<<endl;
+    cout<<publicKey;
+    cout<<"-----------------"<<endl;
     int numBytesSent2 = send(client.getFileDescriptor(), publicKey, key_len, 0);
     if (numBytesSent2 < 0) { // send failed
         ret.success = false;
@@ -947,6 +965,8 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client){
 }
 
 pipe_ret_t TcpServer::sendCertificate(Client & client){
+
+    cout<<"Sending the certificate . . ."<<endl;
 
     pipe_ret_t ret;
 
@@ -972,8 +992,9 @@ pipe_ret_t TcpServer::sendCertificate(Client & client){
     // Double send!!!
     size_t cert_len;
     unsigned char* certificate = pem_serialize_certificate(server_cert,&cert_len);
-    cout<<"CERTIFICATE:"<<endl;
-    cout<<certificate<<endl;
+    cout<<"Server certificate:"<<endl;
+    cout<<certificate;
+    cout<<"-----------------"<<endl;
     int numBytesSent = send(client.getFileDescriptor(), certificate, cert_len, 0);
     if (numBytesSent < 0) { // send failed
         ret.success = false;
@@ -1031,14 +1052,12 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
             client.setChatting();
         }
 
-        cout << "Server pub key: " << getDHPublicKey() << endl;
-        cout << "Client pub key: " << client.getClientKeyDH() << endl;
-
         auto* buffer = deriveAndEncryptMessage(msg,size,getDHPublicKey(),client.getClientKeyDH());
 
         cout << "Server, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
-        cout << "Total buffer dimension: "<< strlen((char*)buffer) << endl;
+        cout<<"-----------------"<<endl;
+        cout<<endl;
 
         int numBytesSent = send(client.getFileDescriptor(), buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
         if (numBytesSent < 0) { // send failed

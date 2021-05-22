@@ -48,6 +48,7 @@ private:
 
     bool isChatting = false;
     bool AuthSuccess = false;
+    bool isAdmin = false;
 
     // Client will also have a private key protected by a password
 
@@ -85,7 +86,7 @@ public:
     // Check if command is a valid request
     int checkCommandValidity(string msg);
 
-    unsigned char* pswHash(string msg);
+    unsigned char* pswHash(string msg,bool reg);
 
     //
     // unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* party_key);
@@ -106,6 +107,9 @@ public:
 
     bool getChatting() { return isChatting; }
     void setChatting() { isChatting = true; }
+
+    bool getAdmin() { return isAdmin; }
+    void setAdmin() { isAdmin = true; }
 
     bool getAuthSuccess() { return AuthSuccess; }
     void setAuthSuccess(bool x) { AuthSuccess = x; }

@@ -370,6 +370,8 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     unsigned char* secret;
 
     /* Retrieving shared secret’s length */
+    cout<<"---------ENCRYPTING-----------"<<endl;
+    cout<<"Deriving the shared secret . . ."<<endl;
     size_t secretlen;
     if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
         handleErrors();
@@ -385,6 +387,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     EVP_PKEY_CTX_free(ctx_drv);
 
     // We need to derive the hash of the shared secret now
+    cout<<"Hashing the shared secret . . ."<<endl;
     unsigned char* digest;
     unsigned int digestlen;
     EVP_MD_CTX* digest_ctx;
@@ -425,7 +428,6 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     unsigned char *cphr_buf;
     unsigned char *tag_buf;
     int cphr_len;
-    int tag_len;
     int pt_len = strlen(msg);
 
     cphr_buf = (unsigned char*)malloc(size);
@@ -476,6 +478,9 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
  */ 
 unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY* myPublicKey, EVP_PKEY *partyPublicKey) {
 
+    cout<<"---------DECRYPTING-----------"<<endl;
+    cout<<"Deriving the shared secret . . ." << endl;
+
     // Derive the shared secret
     EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(myPublicKey, NULL);
     EVP_PKEY_derive_init(ctx_drv);
@@ -500,6 +505,7 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
     EVP_PKEY_CTX_free(ctx_drv);
 
     // We need to derive the hash of the shared secret now
+    cout<<"Hashing the shared secret . . ."<<endl;
     unsigned char* digest;
     unsigned int digestlen;
     EVP_MD_CTX* digest_ctx;
@@ -549,7 +555,10 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
     unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
 
     // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
-    int decrypted_len = gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
+    cout<<"AES GCM decryption . . ."<<endl;
+    cout<<"-----------------"<<endl;
+    
+    gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
 
     free(key);
 

@@ -43,7 +43,8 @@ void sig_exit(int s)
 
 // observer callback. will be called for every new message received by the server
 void onIncomingMsg(const char * msg, size_t size) {
-	cout << "Got msg from server: " << msg << std::endl;
+	cout << "<Server>: " << msg << std::endl;
+    cout<<endl;
 }
 
 // observer callback. will be called when server disconnects
@@ -72,10 +73,9 @@ string insertHash(string msg, string digest){
          words.push_back(pointer);
         pointer = strtok(NULL," "); 
     }
-
-    string ret = words.at(0) + " " + digest;
-    cout<<"RET:"<<endl;
-    cout<<ret<<endl;
+    string ret;
+    if(words.size() == 2) ret = words.at(0) + " " + digest;
+        else if (words.size() == 3) ret = words.at(0) + " " + words.at(1) + " " + digest;
     return ret;
 }
 
@@ -93,9 +93,13 @@ int main() {
     // connect client to an open server
     pipe_ret_t connectRet = client.connectTo("127.0.0.1", 65123);
     if (connectRet.success) {
-        cout << "Client connected successfully" << std::endl;
+        cout<<"-----------------"<<endl;
+        cout << "Client connected successfully" <<endl;
+        cout<<"-----------------"<<endl;
     } else {
-        cout << "Client failed to connect: " << connectRet.msg << std::endl;
+        cout<<"-----------------"<<endl;
+        cout << "Client failed to connect: " << connectRet.msg <<endl;
+        cout<<"-----------------"<<endl;
         return EXIT_FAILURE;
     }
  
@@ -107,20 +111,30 @@ int main() {
         getline(cin,msg);   //"hello server\n";
         int valid = 0;
         if(!client.getChatting()) valid = client.checkCommandValidity(msg); //if it is talking to the server, only a set of commands can be performed
-        if(valid == 0 || valid == 1){
-            if(valid==1){
-                unsigned char* digest = client.pswHash(msg);
+        if(valid >= 0){
+            if(valid >= 1){
+                unsigned char* digest;
+                if(valid == 1) digest = client.pswHash(msg,false);
+                    else digest = client.pswHash(msg,true);
                 string hex_digest;
                 stream2hex((char*)digest,hex_digest);
+                cout<<"Password Hash: "<<hex_digest<<endl;
                 msg = insertHash(msg,hex_digest);
+            }
+            if(client.getChatting()){
+                cout<<"-----------------"<<endl;
+                cout<<"Sending the message to the other client . . ."<<endl;
+            } else {
+                cout<<"-----------------"<<endl;
+                cout<<"Sending the message to the server . . ."<<endl;
             }
             pipe_ret_t sendRet = client.sendMsg(msg.c_str(), msg.size());
             if (!sendRet.success) {
             std::cout << "Failed to send msg: " << sendRet.msg << std::endl;
             break;
             }
-        } else if(valid == -2) { cout << "This command has not been recognize, try :HELP if you want a list of all the commands."<<endl;}
-        else if(valid == -3) { cout << "Invalid user command, it must be formatted like ':USER <username>'"<<endl;}
+        } else if(valid == -2) { cout << "<ChatBox>: This command has not been recognize, try :HELP if you want a list of all the commands."<<endl;}
+        else if(valid == -3) { cout << "<ChatBox>: Invalid user command, it must be formatted like ':USER <username>'"<<endl;}
         
         sleep(1);
     }

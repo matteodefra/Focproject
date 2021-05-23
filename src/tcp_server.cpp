@@ -526,6 +526,11 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
        
     }
     else if (strncmp(request.c_str(),":LOGIN",6) == 0) {
+        if (client.isLogged()) {
+            // Cannot start a request-to-talk until a login is provided
+            string response = "You are already logged!";
+            ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+        }
         // A must function: each client must furnish a login name
         string response = loginClient(client,request);
         ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
@@ -624,6 +629,8 @@ bool TcpServer::deleteClient(Client & client) {
     int clientIndex = -1;
     for (uint i=0; i<m_clients.size(); i++) {
         if (m_clients[i] == client) {
+            EVP_PKEY_free(m_clients[i].getClientKeyRSA());
+            EVP_PKEY_free(m_clients[i].getClientKeyDH());
             clientIndex = i;
             break;
         }

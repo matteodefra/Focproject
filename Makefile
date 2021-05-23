@@ -1,18 +1,18 @@
 CPPFLAGS=-g -pthread -Wall
-LDFLAGS=-L. -g
+LDFLAGS=-g
 LDLIBS=-lcrypto
 AR=ar
 ARFLAGS=rvs
 
-TARGETS 			=	server_example \
-						client_example
+TARGETS 			=	build/server_example \
+						build/client_example
 
 
-OBJECTSSERVER	=	tcp_server.o \
-					client.o 
+OBJECTSSERVER	=	build/tcp_server.o \
+					build/client.o 
 					 
 
-OBJECTSCLIENT = tcp_client.o  	
+OBJECTSCLIENT = build/tcp_client.o  	
 
 
 INCLUDE_SERVER=	include/util.h \
@@ -32,37 +32,37 @@ INCLUDE_CLIENT= include/util.h \
 
 .SUFFIXES: .cpp .h
 
-%: src/%.cpp 
+build/%: src/%.cpp 
 	g++ $(CPPFLAGS) $(INCLUDES) $(LDFLAGS) -o $@ $< $(LDLIBS)
 
-%: src/%.cpp 
+build/%: src/%.cpp 
 	g++ $(CPPFLAGS) $(INCLUDES) $(LDFLAGS) -o $@ $< $(LDLIBS)
 
-%.o: %.cpp 
+build/%.o: %.cpp 
 	g++ $(CFLAGS) $(INCLUDES) $(LDFLAGS) -c -o $@ $< $(LDLIBS) 
 
-%.o: src/%.cpp 
+build/%.o: src/%.cpp 
 	g++ $(CFLAGS) $(INCLUDES) $(LDFLAGS) -c -o $@ $< $(LDLIBS) 
 
 
 all: $(TARGETS)
 
 
-server_example: server_example.o libserver.a $(INCLUDE_SERVER)
+build/server_example: build/server_example.o build/libserver.a $(INCLUDE_SERVER)
 	g++ $(CPPFLAGS) $(INCLUDES) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 
-client_example: client_example.o libclient.a $(INCLUDE_CLIENT)
+build/client_example: build/client_example.o build/libclient.a $(INCLUDE_CLIENT)
 	g++ $(CPPFLAGS) $(INCLUDES) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 
-libserver.a: $(OBJECTSSERVER)
+build/libserver.a: $(OBJECTSSERVER)
 	$(AR) $(ARFLAGS) $@ $^
 
 
-libclient.a: $(OBJECTSCLIENT)
+build/libclient.a: $(OBJECTSCLIENT)
 	$(AR) $(ARFLAGS) $@ $^
 
 
 clean:
-	rm -rf $(TARGETS) *.o *.a 
+	rm -rf build/*

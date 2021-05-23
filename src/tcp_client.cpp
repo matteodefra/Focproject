@@ -191,6 +191,7 @@ int TcpClient::generateDHKeypairs() {
     int res = EVP_PKEY_set1_DH(dh_params,tmp);
     DH_free(tmp);
 
+
     if (res == 0) {
         finish();
         handleErrors();
@@ -205,6 +206,9 @@ int TcpClient::generateDHKeypairs() {
         cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
         return 0;
     }
+
+    EVP_PKEY_CTX_free(ctx);
+    EVP_PKEY_free(dh_params);
 
     mykey_pub = my_pubkey;    
     return 1;
@@ -224,7 +228,10 @@ void TcpClient::saveMyKey() {
     cout<<"-----------------"<<endl;
  
     FILE *file = fopen(path.c_str(),"r");
-    if (!file) handleErrors();
+    if (!file) {
+        finish();
+        handleErrors();
+    }
 
     // Ask client password in order to read the private key
     string val;
@@ -267,6 +274,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 
         // Change name accordingly
         int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
+        free(buffer);
         if (numBytesSent < 0 ) { // send failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -330,6 +338,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         cout<<"-----------------"<<endl;
         // Change name accordingly
         int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
+        free(buffer);
         if (numBytesSent < 0 ) { // send failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -401,7 +410,7 @@ bool TcpClient::clientRecognition(){
     int numOfBytesReceived = recv(m_sockfd, recv_msg, MAX_PACKET_SIZE, 0);
 
     if(numOfBytesReceived < 1) {
-        cout<<"Error receinving the username verification"<<endl;
+        cout<<"Error receiving the username verification"<<endl;
         return false;
     }
     string success_msg = "Client successfully recognize!";
@@ -524,6 +533,8 @@ bool TcpClient::authenticateServer() {
 
     X509_STORE_CTX_free(ctx);
     X509_STORE_free(store);
+    X509_free(cert_ca);
+    X509_CRL_free(crl_ca);
 
     //Extract the pubkey from the certificate 
 
@@ -532,6 +543,8 @@ bool TcpClient::authenticateServer() {
         cout<<"Error retrieving the public key from certificate"<<endl;
         return false;
     }
+
+    free(server_cert);
 
     cout<<"Server RSA pubkey retrived successfully."<<endl;
     serverRSAKey = server_pubkey;
@@ -576,11 +589,11 @@ bool TcpClient::authenticateServer() {
     }
 
     EVP_MD_CTX_free(md_ctx);
-    // EVP_PKEY_free(mykey);
 
     cout << "Sending the client message signed . . ."<< endl;
 
     int numBytesSent3 = send(m_sockfd, signature, signature_len, 0);
+    free(signature);
 
     if (numBytesSent3 < 0 ) { // send failed
         cout<<"Error sending the signature"<<endl;
@@ -639,6 +652,7 @@ bool TcpClient::authenticateServer() {
     cout<<"-----------------"<<endl;
 
     int numBytesSent4 = send(m_sockfd, publicKey, key_len, 0);
+    free(publicKey);
     if (numBytesSent4 < 0) { // send failed
         cout<<"Error sending DH public key"<<endl;
         cout<<"-----------------"<<endl;

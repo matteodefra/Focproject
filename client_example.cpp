@@ -118,6 +118,7 @@ int main() {
                     else digest = client.pswHash(msg,true);
                 string hex_digest;
                 stream2hex((char*)digest,hex_digest);
+                free(digest);
                 cout<<"Password Hash: "<<hex_digest<<endl;
                 msg = insertHash(msg,hex_digest);
             }

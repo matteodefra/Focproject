@@ -15,6 +15,8 @@ using namespace std;
 
 
 #define IV_LEN EVP_CIPHER_iv_length(EVP_aes_128_gcm())
+#define NONCE_LEN 16
+#define AAD_LEN 12
 
 /**
  * Utility function to handle OPENSSL errors
@@ -425,6 +427,16 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
         return nullptr;
     }
 
+    unsigned char aad_gcm[AAD_LEN];
+
+    RAND_poll();
+    res = RAND_bytes(aad_gcm,AAD_LEN);
+    if (res != 1) {
+        cout << "Core dumped here" << endl;
+        // handleErrors();
+        return nullptr;
+    }
+
     unsigned char *cphr_buf;
     unsigned char *tag_buf;
     int cphr_len;
@@ -432,9 +444,9 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
 
     cphr_buf = (unsigned char*)malloc(size);
     tag_buf = (unsigned char*)malloc(16);
-    cphr_len = gcm_encrypt(msg2,pt_len,iv_gcm,12,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
+    cphr_len = gcm_encrypt(msg2,pt_len,aad_gcm,AAD_LEN,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
 
-    auto *buffer = new unsigned char[12/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
+    auto *buffer = new unsigned char[AAD_LEN/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
 
     free(key);
 
@@ -443,21 +455,20 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     // copy iv
     memcpy(buffer+pos, iv_gcm, IV_LEN);
     pos += IV_LEN;
-    // delete [] iv_gcm;
 
     // copy aad
-    memcpy((buffer+pos), iv_gcm, 12);
-    pos += 12;
+    memcpy((buffer+pos), aad_gcm, AAD_LEN);
+    pos += AAD_LEN;
 
     // copy encrypted data
     memcpy((buffer+pos), cphr_buf, cphr_len);
     pos += pt_len;
-    delete[] cphr_buf;
+    free(cphr_buf);
 
     // copy tag
     memcpy((buffer+pos), tag_buf, 16);
     pos += 16;
-    delete [] tag_buf;
+    free(tag_buf);
 
     return buffer;
 
@@ -537,11 +548,11 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
 
     // retrieve AAD
     unsigned char AAD[12];
-    memcpy(AAD, msg+pos,12);
-    pos += 12;
+    memcpy(AAD, msg+pos,AAD_LEN);
+    pos += AAD_LEN;
 
     // retrieve encrypted data
-    size_t encrypted_len = numOfBytesReceived - 16 - 12 - 12;
+    size_t encrypted_len = numOfBytesReceived - 16 - IV_LEN - AAD_LEN;
     unsigned char encryptedData[encrypted_len];
     memcpy(encryptedData,msg+pos,encrypted_len);
     pos += encrypted_len;
@@ -558,7 +569,7 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
     cout<<"AES GCM decryption . . ."<<endl;
     cout<<"-----------------"<<endl;
     
-    gcm_decrypt(encryptedData,encrypted_len,AAD,12,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
+    gcm_decrypt(encryptedData,encrypted_len,AAD,AAD_LEN,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
 
     free(key);
 

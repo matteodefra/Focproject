@@ -70,10 +70,12 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
 
     cout<<"Certificate Request received."<<endl;
 
-    ret = sendCertificate(client);
+    unsigned char nonce[NONCE_LEN];
+
+    ret = sendCertificate(client,nonce);
     if(ret.success == false) return ret;
 
-    ret = verifySignature(client);
+    ret = verifySignature(client,nonce);
     if(ret.success == false) return ret;
 
     ret = sendDHPubkey(client);
@@ -213,7 +215,6 @@ bool checkUsername(string username){
  * Insert the credentials of the new registered user in a file in the format "username password"
  * 
  */
-
 bool insertCredentials(string username, string psw){
   ofstream myfile;
   myfile.open ("./AddOn/users.txt", ios::app);
@@ -381,6 +382,12 @@ unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
 }
 
 
+/**
+ * Utility function used to set the RSA client public key stored onto the server
+ * 
+ * @param client the connected client
+ * @param username the name of the connected client
+ */
 void setClientPublicKey(Client &client, char *username) {
 
     string name(username);
@@ -411,7 +418,6 @@ void setClientPublicKey(Client &client, char *username) {
 /**
  * 
  */
-
 pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
     
     cout<<"Message received: "<<msg<<endl;
@@ -678,7 +684,7 @@ void TcpServer::publishClientDisconnected(Client & client) {
 
 
 /**
- * 
+ * A utility function used to create a key pair of Diffie Hellman for the server
  */ 
 void TcpServer::loadServerDHKeys() {
 
@@ -838,6 +844,9 @@ pipe_ret_t TcpServer::sendToAllClients(const char * msg, size_t size) {
     return ret;
 }
 
+/**
+ * Simple utility function called upon receival of the client DH public key
+ */ 
 pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client){
 
     pipe_ret_t ret;
@@ -865,7 +874,10 @@ pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client){
 }
 
 
-pipe_ret_t TcpServer::verifySignature(Client & client){
+/**
+ * Utility function used to verify the signature of the client 
+ */ 
+pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 
     pipe_ret_t ret;
 
@@ -876,6 +888,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
     int numOfBytesReceived = recv(client.getFileDescriptor(), signature, MAX_PACKET_SIZE, 0);
 
     cout << "Signature received." << endl;
+    cout << "Num of bytes " << numOfBytesReceived << endl;
 
     if(numOfBytesReceived < 1) {
         client.setDisconnected();
@@ -891,10 +904,18 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
         return ret;
     }
     else {
+        
+        auto *clear_buf = new unsigned char[strlen(client.getClientName().c_str()) + NONCE_LEN];
 
-        char *clear_buf = (char*)client.getClientName().c_str();
-        strcat(clear_buf," user");
-        int clear_size = strlen(clear_buf);
+        cout << "Nonce here: " << nonce << endl;
+
+        int start = 0;
+        memcpy(clear_buf+start,client.getClientName().c_str(),strlen(client.getClientName().c_str()));
+        start += strlen(client.getClientName().c_str());
+
+        memcpy(clear_buf+start,nonce,NONCE_LEN);
+        
+        int clear_size = strlen(client.getClientName().c_str()) + NONCE_LEN;
 
         int res;
         // Verify the signature in the file
@@ -938,6 +959,9 @@ pipe_ret_t TcpServer::verifySignature(Client & client){
 
 }
 
+/**
+ * Simple utility function used by the server to send its public key
+ */
 pipe_ret_t TcpServer::sendDHPubkey(Client & client){
 
     pipe_ret_t ret;
@@ -971,7 +995,10 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client){
 
 }
 
-pipe_ret_t TcpServer::sendCertificate(Client & client){
+/**
+ * Utility function used to send server certificate to the client
+ */
+pipe_ret_t TcpServer::sendCertificate(Client & client,unsigned char* nonce){
 
     cout<<"Sending the certificate . . ."<<endl;
 
@@ -1002,13 +1029,36 @@ pipe_ret_t TcpServer::sendCertificate(Client & client){
     cout<<"Server certificate:"<<endl;
     cout<<certificate;
     cout<<"-----------------"<<endl;
-    int numBytesSent = send(client.getFileDescriptor(), certificate, cert_len, 0);
+
+    RAND_poll();
+    int res = RAND_bytes(nonce,NONCE_LEN);
+    if (res != 1) {
+        cout << "Core dumped here" << endl;
+        // handleErrors();
+        ret.success = false;
+        ret.msg = "Error in  creating nonce";
+        return ret;
+    }
+
+    auto *buffer = new unsigned char[NONCE_LEN+cert_len];
+
+    int pos = 0;
+
+    // copy nonce
+    memcpy(buffer+pos, nonce, NONCE_LEN);
+    pos += NONCE_LEN;
+
+    // copy certificate
+    memcpy((buffer+pos), certificate, cert_len);
+    pos += cert_len;
+
+    int numBytesSent = send(client.getFileDescriptor(), buffer, NONCE_LEN+cert_len, 0);
     if (numBytesSent < 0) { // send failed
         ret.success = false;
         ret.msg = strerror(errno);
         return ret;
     }
-    if ((uint)numBytesSent < cert_len) { // not all bytes were sent
+    if ((uint)numBytesSent < NONCE_LEN + cert_len) { // not all bytes were sent
         ret.success = false;
         char msg[100];
         sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, cert_len);

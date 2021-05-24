@@ -13,7 +13,6 @@ using namespace std;
 /**
  *  Help message printed after the command :HELP
  */
-
 void helpMsg(){
     cout<<"********************************************************************"<<endl;
     cout<<"LIST OF AVAILABLE COMMANDS:"<<endl;
@@ -72,7 +71,6 @@ unsigned char* TcpClient::pswHash(string msg, bool reg){
  *  Return   >1 if the command is :LOGIN / :REG (1 login | 2 reg)
  * 
  */
-
 int TcpClient::checkCommandValidity(string msg) { 
 
 
@@ -168,6 +166,9 @@ pipe_ret_t TcpClient::connectTo(const std::string & address, int port) {
 }
 
 
+/**
+ * Callback used in the PEM_readPrivateKey() to check correctness of user password
+ */
 static int _callback(char *buf, int max_len, int flag, void *ctx)
 {   
 
@@ -182,6 +183,10 @@ static int _callback(char *buf, int max_len, int flag, void *ctx)
 }
 
 
+/**
+ * A useful function which uses the static struct of generated p and g DH parameters to create a Diffie Hellman
+ * key pair for the client whenever a connecation is established
+ */
 int TcpClient::generateDHKeypairs() {
 
     EVP_PKEY* dh_params;
@@ -216,6 +221,10 @@ int TcpClient::generateDHKeypairs() {
 }
 
 
+/**
+ * Function called at starting point of client lifecyle. It is used to store the client RSA private key in order to 
+ * authenticate with the server in the starting phase
+ */
 void TcpClient::saveMyKey() {
     string name = getClientName();
 
@@ -258,8 +267,7 @@ void TcpClient::saveMyKey() {
 
 
 /**
- * Allow a client to send a message to the server. The first setting + encryption call could also be inserted 
- * directly in a utility function, returning the buffer variable since it is the final value we need
+ * Allow a client to send a message to the server.
  */
 pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) { 
     pipe_ret_t ret;
@@ -294,7 +302,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
  
     else {
 
-        // Workaround now to save client name and client public key
+        // First message (which must be user) allow us to store the client name and access its private key
         if (strncmp(msg,":USER",5) == 0) {
 
             char *copy = (char*) malloc(size);
@@ -400,7 +408,6 @@ void TcpClient::publishServerDisconnected(const pipe_ret_t & ret) {
  * false will be returned if the user is not present.
  * 
  */
-
 bool TcpClient::clientRecognition(){
 
     //Send client msg with username
@@ -513,9 +520,18 @@ bool TcpClient::authenticateServer() {
     cout<<recv_msg;
     cout<<"-----------------"<<endl;
 
+    //Get nonce
+    unsigned char nonce[NONCE_LEN];
+
+    int pos = 0;
+    // retrieve IV
+    memcpy(nonce,recv_msg+pos,NONCE_LEN);
+    pos += NONCE_LEN;
+
+    
     //Deserializing the msg
 
-    X509* server_cert = pem_deserialize_certificate(recv_msg,strlen((char*)recv_msg));
+    X509* server_cert = pem_deserialize_certificate((unsigned char*)recv_msg + NONCE_LEN,numOfBytesReceived-NONCE_LEN);
 
     //Verify Certificate 
 
@@ -552,10 +568,15 @@ bool TcpClient::authenticateServer() {
 
     // Now user need to authenticate himself by digitally sign a message with its own public key
     cout<<"Starting client authentication . . ."<<endl;
-    string toSend = getClientName() + " user";
-    cout<<"Message to be signed created"<<endl;
-    char *sendMsg = (char*)toSend.c_str(); 
 
+    auto* sendMsg = new unsigned char[getClientName().length() + NONCE_LEN];
+    int start = 0;
+    memcpy(sendMsg + start,getClientName().c_str(),strlen(getClientName().c_str()));
+    start += strlen(getClientName().c_str());
+
+    memcpy(sendMsg + start,nonce,NONCE_LEN);
+    cout<<"Message to be signed created"<<endl;
+    
     unsigned char* signature;
     unsigned int signature_len;
 
@@ -574,7 +595,7 @@ bool TcpClient::authenticateServer() {
         ERR_print_errors_fp(stderr);
         return false;
     }
-    ret = EVP_SignUpdate(md_ctx,(unsigned char*)sendMsg,strlen(sendMsg));
+    ret = EVP_SignUpdate(md_ctx,sendMsg,NONCE_LEN+strlen(getClientName().c_str()));
     if (ret == 0) {
         cout << "ERROR!" << endl;
         ERR_print_errors_fp(stderr);
@@ -603,7 +624,6 @@ bool TcpClient::authenticateServer() {
         cout<<"Error sending the signature, not all bytes were sent"<< endl;
         return false;
     }
-
 
     // Send public key, authentication using certificates
     // Then symmetric session key negotiation via elliptic curve diffie hellman
@@ -725,11 +745,15 @@ void TcpClient::ReceiveTask() {
 }
 
 
+// Set peerkey istance inside TcpClient: this is the public key of the peer whenever a req to talk is initialized
 void TcpClient::setAndStorePeerKey(unsigned char* key) {
-    // Set peerkey istance inside TcpClient
     peerKey = pem_deserialize_pubkey(key,strlen((char*)key));
 }
 
+/**
+ * Simple process request to get the :KEY message. When the server send this kind of message, the other peer public key can be found
+ * in the tail of the message
+ */
 void TcpClient::processRequest(unsigned char* plaintext_buffer) {
     char *message = (char*)plaintext_buffer;
 

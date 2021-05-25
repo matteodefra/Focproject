@@ -80,11 +80,15 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
     
     free(nonce);
 
-    ret = sendDHPubkey(client);
+    unsigned char* nonce2 = (unsigned char*)malloc(NONCE_LEN);
+
+    ret = receiveClientPubkeyDH(client,nonce2);
     if(ret.success == false) return ret;
 
-    ret = receiveClientPubkeyDH(client);
+    ret = sendDHPubkey(client,nonce2);
     if(ret.success == false) return ret;
+
+    
 
     // send certificate
     // negotiate elliptic curve diffie hellman key
@@ -849,26 +853,34 @@ pipe_ret_t TcpServer::sendToAllClients(const char * msg, size_t size) {
 /**
  * Simple utility function called upon receival of the client DH public key
  */ 
-pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client){
+pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client, unsigned char* nonce2){
 
     pipe_ret_t ret;
 
-    unsigned char pubkey_dh[MAX_PACKET_SIZE];
-    int numOfBytesReceived = recv(client.getFileDescriptor(), pubkey_dh, MAX_PACKET_SIZE, 0);;
-
-    cout<<"Receiving client DH pubkey . . ."<<endl;
+    unsigned char pubkey_dh_msg[MAX_PACKET_SIZE];
+    int numOfBytesReceived = recv(client.getFileDescriptor(), pubkey_dh_msg, MAX_PACKET_SIZE, 0);;
 
     if(numOfBytesReceived < 1) {
-        ret.msg = "Error receinving the certificate request";
+        ret.msg = "Error receinving the dh public key";
         ret.success = false;
         return ret;
     }
 
-    cout << "Client DH pubkey: " << endl;
-    cout<< pubkey_dh; 
+    cout<<"-----------------"<<endl;
+    cout<<"Receiving client DH pubkey message . . ."<<endl;
+
+    //Retrive nonce
+
+    memcpy(nonce2,pubkey_dh_msg,NONCE_LEN);
+
+    cout<<"Nonce extracted: "<<endl;
+    BIO_dump_fp(stdout,(char*)nonce2,NONCE_LEN);
+
+    cout << "Client DH pubkey message: " << endl;
+    cout<< pubkey_dh_msg + NONCE_LEN; 
     cout<<"-----------------"<<endl;
 
-    EVP_PKEY* pubkeyDH = pem_deserialize_pubkey(pubkey_dh,numOfBytesReceived);
+    EVP_PKEY* pubkeyDH = pem_deserialize_pubkey(pubkey_dh_msg + NONCE_LEN,numOfBytesReceived-NONCE_LEN);
     client.setClientKeyDH(pubkeyDH);
     ret.success = true;
     return ret;
@@ -909,7 +921,9 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
         
         auto *clear_buf = new unsigned char[strlen(client.getClientName().c_str()) + NONCE_LEN];
 
-        cout << "Nonce here: " << nonce << endl;
+        cout << "Nonce to verify: " <<endl;
+        BIO_dump_fp(stdout,(char*)nonce,NONCE_LEN);
+        cout<<"-----------------"<<endl;
 
         int start = 0;
         memcpy(clear_buf+start,client.getClientName().c_str(),strlen(client.getClientName().c_str()));
@@ -923,7 +937,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
         // Verify the signature in the file
         EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
         if (!md_ctx) {
-            cout << "ERROR1!" << endl;
+            cout << "Error creating the context during the signature verification" << endl;
             ERR_print_errors_fp(stderr);
             ret.success = false;
             return ret;
@@ -931,7 +945,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 
         res = EVP_VerifyInit(md_ctx,EVP_sha256());
         if (res == 0) {
-            cout << "ERROR2!" << endl;
+            cout << "Error in the VerifyInit during the signature verification" << endl;
             ERR_print_errors_fp(stderr);
             ret.success = false;
             return ret;
@@ -939,7 +953,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 
         res = EVP_VerifyUpdate(md_ctx,clear_buf,clear_size);
         if (res == 0) {
-            cout << "ERROR3!" << endl;
+            cout << "Error in the VerifyUpdate during the signature verification" << endl;
             ERR_print_errors_fp(stderr);
             ret.success = false;
             return ret;
@@ -947,7 +961,7 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 
         res = EVP_VerifyFinal(md_ctx,(unsigned char*)signature,numOfBytesReceived,client.getClientKeyRSA());
         if (res == 0) {
-            cout << "ERROR4!" << endl;
+            cout << "Error in the VerifyFinal during the signature verification" << endl;
             ERR_print_errors_fp(stderr);
             ret.success = false;
             return ret;
@@ -964,20 +978,37 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 /**
  * Simple utility function used by the server to send its public key
  */
-pipe_ret_t TcpServer::sendDHPubkey(Client & client){
+pipe_ret_t TcpServer::sendDHPubkey(Client & client,unsigned char* nonce2){
 
     pipe_ret_t ret;
 
-    cout<<"Sending Server DH public key to client . . ."<<endl;
+    cout<<"Sending Server DH public key to client with nonce. . ."<<endl;
 
     
     // Now server will send its public key generated with diffie hellman parameters
     size_t key_len;
     unsigned char* publicKey = pem_serialize_pubkey(getDHPublicKey(),&key_len);
+    unsigned int publickey_len = strlen((char*) publicKey);
+
+    auto* publicKey_msg = new unsigned char[NONCE_LEN+publickey_len];
+
+    int pos= 0;
+
+    //copy nonce
+    memcpy(publicKey_msg+pos,nonce2,NONCE_LEN);
+    pos += NONCE_LEN;
+
+    //copy pubkey
+    memcpy(publicKey_msg+pos,publicKey,publickey_len);
+
+    cout<<"Nonce inserted: "<<endl;
+    BIO_dump_fp(stdout,(char*)nonce2,NONCE_LEN);
+    cout<<"-----------------"<<endl;
     cout<<"Server DH pubkey:"<<endl;
     cout<<publicKey;
     cout<<"-----------------"<<endl;
-    int numBytesSent2 = send(client.getFileDescriptor(), publicKey, key_len, 0);
+
+    int numBytesSent2 = send(client.getFileDescriptor(), publicKey_msg, publickey_len+NONCE_LEN, 0);
     if (numBytesSent2 < 0) { // send failed
         ret.success = false;
         ret.msg = strerror(errno);
@@ -1001,8 +1032,6 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client){
  * Utility function used to send server certificate to the client
  */
 pipe_ret_t TcpServer::sendCertificate(Client & client,unsigned char* nonce){
-
-    cout<<"Sending the certificate . . ."<<endl;
 
     pipe_ret_t ret;
 
@@ -1033,12 +1062,13 @@ pipe_ret_t TcpServer::sendCertificate(Client & client,unsigned char* nonce){
     cout<<"-----------------"<<endl;
 
     RAND_poll();
+    cout<<"Creating a nonce . . ."<<endl;
     int res = RAND_bytes(nonce,NONCE_LEN);
     if (res != 1) {
         cout << "Core dumped here" << endl;
         // handleErrors();
         ret.success = false;
-        ret.msg = "Error in  creating nonce";
+        ret.msg = "Error creating nonce(sendCertificate)";
         return ret;
     }
 
@@ -1053,6 +1083,12 @@ pipe_ret_t TcpServer::sendCertificate(Client & client,unsigned char* nonce){
     // copy certificate
     memcpy((buffer+pos), certificate, cert_len);
     pos += cert_len;
+
+    
+    cout<<"Nonce computed: "<<endl;
+    BIO_dump_fp(stdout,(char*)nonce,NONCE_LEN);
+    cout<<"Sending the nonce with the certificate . . ."<<endl;
+    cout<<"-----------------"<<endl;
 
     int numBytesSent = send(client.getFileDescriptor(), buffer, NONCE_LEN+cert_len, 0);
     if (numBytesSent < 0) { // send failed

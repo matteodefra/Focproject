@@ -124,9 +124,9 @@ public:
     pipe_ret_t sendToClient(Client & client, const char * msg, size_t size);
     pipe_ret_t sendCertificate(Client & client,unsigned char *nonce);
     pipe_ret_t verifySignature(Client & client,unsigned char *nonce);
-    pipe_ret_t sendDHPubkey(Client & client);
+    pipe_ret_t sendDHPubkey(Client & client,unsigned char* nonce2);
     pipe_ret_t checkClientIdentity(Client & client,string msg);
-    pipe_ret_t receiveClientPubkeyDH(Client & client);
+    pipe_ret_t receiveClientPubkeyDH(Client & client, unsigned char* nonce2);
     pipe_ret_t authenticationStart(Client & client,string msg);
     pipe_ret_t finish();
     void printClients();

@@ -70,13 +70,15 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
 
     cout<<"Certificate Request received."<<endl;
 
-    unsigned char nonce[NONCE_LEN];
+    unsigned char* nonce = (unsigned char*)malloc(NONCE_LEN);
 
     ret = sendCertificate(client,nonce);
     if(ret.success == false) return ret;
 
     ret = verifySignature(client,nonce);
     if(ret.success == false) return ret;
+    
+    free(nonce);
 
     ret = sendDHPubkey(client);
     if(ret.success == false) return ret;

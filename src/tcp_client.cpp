@@ -520,15 +520,20 @@ bool TcpClient::authenticateServer() {
     cout<<recv_msg;
     cout<<"-----------------"<<endl;
 
+    cout.flush();
+
     //Get nonce
-    unsigned char nonce[NONCE_LEN];
+    unsigned char* nonce = (unsigned char*)malloc(NONCE_LEN);
 
     int pos = 0;
     // retrieve IV
-    memcpy(nonce,recv_msg+pos,NONCE_LEN);
+    memcpy(nonce,recv_msg,NONCE_LEN);
     pos += NONCE_LEN;
 
-    
+    cout << "Nonce received: " << nonce << endl;
+
+    cout << "Nonce bytes: " << strlen((char*)nonce) << endl;
+
     //Deserializing the msg
 
     X509* server_cert = pem_deserialize_certificate((unsigned char*)recv_msg + NONCE_LEN,numOfBytesReceived-NONCE_LEN);
@@ -612,6 +617,9 @@ bool TcpClient::authenticateServer() {
     EVP_MD_CTX_free(md_ctx);
 
     cout << "Sending the client message signed . . ."<< endl;
+    
+    // Server nonce not necessary anymore
+    free(nonce);
 
     int numBytesSent3 = send(m_sockfd, signature, signature_len, 0);
     free(signature);

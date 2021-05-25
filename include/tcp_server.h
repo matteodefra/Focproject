@@ -61,6 +61,8 @@ private:
 
 public:
 
+    EVP_PKEY* serverRSApubkey;
+
     // Start server routine
     pipe_ret_t start(int port);
 

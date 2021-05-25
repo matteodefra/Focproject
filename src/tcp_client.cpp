@@ -569,7 +569,7 @@ bool TcpClient::authenticateServer() {
 
     free(server_cert);
 
-    cout<<"Server RSA pubkey retrived successfully."<<endl;
+    cout<<"Server RSA pubkey retrived successfully." << server_pubkey << endl;
     serverRSAKey = server_pubkey;
 
 
@@ -637,6 +637,10 @@ bool TcpClient::authenticateServer() {
 
     //SEND DHpubkey to server
 
+    unsigned char ackMsg[MAX_PACKET_SIZE];
+    int ackBytes = recv(m_sockfd, ackMsg, MAX_PACKET_SIZE, 0);
+    cout << "Received ACK after signature" << endl;
+
     cout<<"-----------------"<<endl;
     cout<<"<ChatBox>: The server has successfully verified your signature, authenticated."<<endl;
     cout<<"-----------------"<<endl;
@@ -653,7 +657,6 @@ bool TcpClient::authenticateServer() {
     }
     cout<<"Nonce created: "<<endl;
     BIO_dump_fp(stdout,(char*)nonce2,NONCE_LEN);
-
     
     cout<<"Sending the client DH pubkey with nonce. . ."<<endl;
 
@@ -670,21 +673,28 @@ bool TcpClient::authenticateServer() {
 
     //copy pubkey
     memcpy((pubKey_msg+position), publicKey, pubkey_len);
-    pos += pubkey_len;
+    position += pubkey_len;
 
     cout << "Client DH pubkey message: " <<endl;
-    cout<<publicKey;
+    cout << publicKey;
     cout<<"-----------------"<<endl;
 
+    // Encrypt pubkey message with digital envelope
+    size_t encrypted_len;
 
-    int numBytesSent4 = send(m_sockfd, pubKey_msg,strlen((char*)pubKey_msg), 0);
-    free(publicKey);
+    unsigned char *encrypted = asymmetric_enc(pubKey_msg,NONCE_LEN+pubkey_len,serverRSAKey,&encrypted_len);
+
+    cout << "Length of encrypted buffer after function call: " << encrypted_len << endl;
+
+    int numBytesSent4 = send(m_sockfd, encrypted, encrypted_len, 0);
+    cout << "Num bytes sent: " << numBytesSent4 << endl;
+    // free(publicKey);
     if (numBytesSent4 < 0) { // send failed
         cout<<"Error sending DH public key"<<endl;
         cout<<"-----------------"<<endl;
         return false;
     }
-    if ((uint)numBytesSent4 < key_len) { // not all bytes were sent
+    if ((uint)numBytesSent4 < encrypted_len) { // not all bytes were sent
         cout<<"Error sending DH public key, not all bytes sent"<<endl;
         return false;
     }
@@ -703,10 +713,12 @@ bool TcpClient::authenticateServer() {
     cout<<"Server's DH pubkey received:"<<endl;
     cout<< msg+NONCE_LEN;
 
+    unsigned char* decrypted_message = asymmetric_dec(msg,numOfBytesReceived2,mykey_RSA,serverRSAKey);
+
     unsigned char* nonce_extracted = (unsigned char*)malloc(NONCE_LEN);
 
     //retrieve nonce
-    memcpy(nonce_extracted,msg,NONCE_LEN);
+    memcpy(nonce_extracted,decrypted_message,NONCE_LEN);
 
     cout<<"-----------------"<<endl;
     cout<<"Nonce extracted:"<<endl;
@@ -721,7 +733,7 @@ bool TcpClient::authenticateServer() {
     cout<<"-----------------"<<endl;
 
     // We have to extract the public key from the buffer
-    EVP_PKEY* serverDHPubKey = pem_deserialize_pubkey(msg+NONCE_LEN,numOfBytesReceived2-NONCE_LEN);
+    EVP_PKEY* serverDHPubKey = pem_deserialize_pubkey(decrypted_message+NONCE_LEN,numOfBytesReceived2-NONCE_LEN);
     serverDHKey = serverDHPubKey;
 
     cout<<"Authentication phase ended, DH keys exchanged successfully"<<endl;

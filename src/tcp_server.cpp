@@ -738,7 +738,7 @@ pipe_ret_t TcpServer::start(int port) {
     setServerPrivKey(privkey);
 
     // !!!!!
-    EVP_PKEY_free(privkey);
+    // EVP_PKEY_free(privkey);
 
     fclose(file);
 
@@ -858,7 +858,11 @@ pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client, unsigned char* nonc
     pipe_ret_t ret;
 
     unsigned char pubkey_dh_msg[MAX_PACKET_SIZE];
+    memset(pubkey_dh_msg,0,MAX_PACKET_SIZE);
     int numOfBytesReceived = recv(client.getFileDescriptor(), pubkey_dh_msg, MAX_PACKET_SIZE, 0);;
+
+    cout << "Num of bytes received: " << numOfBytesReceived << endl;
+    cout << "Encrypted message: " << pubkey_dh_msg << endl;
 
     if(numOfBytesReceived < 1) {
         ret.msg = "Error receinving the dh public key";
@@ -869,9 +873,11 @@ pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client, unsigned char* nonc
     cout<<"-----------------"<<endl;
     cout<<"Receiving client DH pubkey message . . ."<<endl;
 
+    unsigned char* decrypted = asymmetric_dec(pubkey_dh_msg,numOfBytesReceived,getServerPrivKey(),serverRSApubkey);
+
     //Retrive nonce
 
-    memcpy(nonce2,pubkey_dh_msg,NONCE_LEN);
+    memcpy(nonce2,decrypted,NONCE_LEN);
 
     cout<<"Nonce extracted: "<<endl;
     BIO_dump_fp(stdout,(char*)nonce2,NONCE_LEN);
@@ -880,7 +886,7 @@ pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client, unsigned char* nonc
     cout<< pubkey_dh_msg + NONCE_LEN; 
     cout<<"-----------------"<<endl;
 
-    EVP_PKEY* pubkeyDH = pem_deserialize_pubkey(pubkey_dh_msg + NONCE_LEN,numOfBytesReceived-NONCE_LEN);
+    EVP_PKEY* pubkeyDH = pem_deserialize_pubkey(decrypted + NONCE_LEN,numOfBytesReceived-NONCE_LEN);
     client.setClientKeyDH(pubkeyDH);
     ret.success = true;
     return ret;
@@ -969,6 +975,9 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 
         cout << "Signature verified correctly! Client is authorized." << endl;
         ret.success = true;
+
+        int sendByteAck = send(client.getFileDescriptor(),"ACK",strlen("ACK"),0);
+
         return ret;
     }
 
@@ -1008,13 +1017,18 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client,unsigned char* nonce2){
     cout<<publicKey;
     cout<<"-----------------"<<endl;
 
-    int numBytesSent2 = send(client.getFileDescriptor(), publicKey_msg, publickey_len+NONCE_LEN, 0);
+    size_t encrypted_len;
+
+    unsigned char* encrypted_envelope = asymmetric_enc(publicKey_msg,NONCE_LEN+publickey_len,client.getClientKeyRSA(),&encrypted_len);
+    cout << "Server encrypted message: " << encrypted_envelope << endl;
+
+    int numBytesSent2 = send(client.getFileDescriptor(), encrypted_envelope, encrypted_len, 0);
     if (numBytesSent2 < 0) { // send failed
         ret.success = false;
         ret.msg = strerror(errno);
         return ret;
     }
-    if ((uint)numBytesSent2 < key_len) { // not all bytes were sent
+    if ((uint)numBytesSent2 < encrypted_len) { // not all bytes were sent
         ret.success = false;
         char msg[100];
         sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent2, key_len);
@@ -1050,6 +1064,9 @@ pipe_ret_t TcpServer::sendCertificate(Client & client,unsigned char* nonce){
         ret.msg = "Error reading the certificate";
         return ret;
     }
+
+    // Get server RSA public key
+    serverRSApubkey = X509_get_pubkey(server_cert);
 
     fclose(server_file);
 

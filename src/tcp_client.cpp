@@ -503,7 +503,7 @@ bool TcpClient::authenticateServer() {
         return false;
     }
 
-    cout<<"Waiting for the certificate . . ."<<endl;
+    cout<<"Waiting for the certificate message . . ."<<endl;
 
     unsigned char recv_msg[MAX_PACKET_SIZE];
     memset(recv_msg,0,MAX_PACKET_SIZE);
@@ -514,7 +514,7 @@ bool TcpClient::authenticateServer() {
         return false;
     }
 
-    cout<<"Certificate received."<<endl;
+    cout<<"Certificate message received."<<endl;
     cout<<"-----------------"<<endl;
 
     cout<<recv_msg;
@@ -526,13 +526,15 @@ bool TcpClient::authenticateServer() {
     unsigned char* nonce = (unsigned char*)malloc(NONCE_LEN);
 
     int pos = 0;
-    // retrieve IV
+
+    // retrieve nonce
     memcpy(nonce,recv_msg,NONCE_LEN);
     pos += NONCE_LEN;
 
-    cout << "Nonce received: " << nonce << endl;
-
+    cout << "Nonce extracted: " <<endl;
+    BIO_dump_fp(stdout,(char*)nonce,NONCE_LEN);
     cout << "Nonce bytes: " << strlen((char*)nonce) << endl;
+    cout<<"-----------------"<<endl;
 
     //Deserializing the msg
 
@@ -633,53 +635,49 @@ bool TcpClient::authenticateServer() {
         return false;
     }
 
-    // Send public key, authentication using certificates
-    // Then symmetric session key negotiation via elliptic curve diffie hellman
-    // Now user wait for server public key
-    char msg[MAX_PACKET_SIZE];
-    memset(msg,0,MAX_PACKET_SIZE);
-    int numOfBytesReceived2 = recv(m_sockfd, msg, MAX_PACKET_SIZE, 0);
+    //SEND DHpubkey to server
 
     cout<<"-----------------"<<endl;
     cout<<"<ChatBox>: The server has successfully verified your signature, authenticated."<<endl;
     cout<<"-----------------"<<endl;
-    cout<<"Server's DH pubkey received:"<<endl;
-    cout<< msg;
 
-    if(numOfBytesReceived2 < 1) {
-        pipe_ret_t ret;
-        ret.success = false;
-        stop = true;
-        if (numOfBytesReceived2 == 0) { //server closed connection
-            ret.msg = "Server closed connection";
-        } else {
-            ret.msg = strerror(errno);
-        }
-        publishServerDisconnected(ret);
-        finish();
+    RAND_poll();
+
+    unsigned char* nonce2 = (unsigned char*)malloc(NONCE_LEN);
+
+    cout<<"Creating a nonce . . ."<<endl;
+    int result = RAND_bytes(nonce2,NONCE_LEN);
+    if (result != 1) {
+        cout << "Error creating nonce(sendCertificate)"<<endl;
+        return false;
     }
+    cout<<"Nonce created: "<<endl;
+    BIO_dump_fp(stdout,(char*)nonce2,NONCE_LEN);
 
-    unsigned char msg2[numOfBytesReceived2];
-    strcpy((char*)msg2,msg);
-
-    // We have to extract the public key from the buffer
-    EVP_PKEY* serverDHPubKey = pem_deserialize_pubkey(msg2,numOfBytesReceived2);
-    serverDHKey = serverDHPubKey;
-
-
-    //SEND DHpubkey to server
-
-    cout<<"-----------------"<<endl;
-    cout<<"Sending the cliend DH pubkey . . ."<<endl;
+    
+    cout<<"Sending the client DH pubkey with nonce. . ."<<endl;
 
     size_t key_len;
     unsigned char* publicKey = pem_serialize_pubkey(mykey_pub,&key_len);
+    unsigned int pubkey_len = strlen((char*)publicKey);
+    auto *pubKey_msg = new unsigned char[NONCE_LEN+pubkey_len];
 
-    cout << "Client DH pubkey: " <<endl;
+    int position = 0;
+
+    //copy nonce
+    memcpy(pubKey_msg+position,nonce2,NONCE_LEN);
+    position += NONCE_LEN;
+
+    //copy pubkey
+    memcpy((pubKey_msg+position), publicKey, pubkey_len);
+    pos += pubkey_len;
+
+    cout << "Client DH pubkey message: " <<endl;
     cout<<publicKey;
     cout<<"-----------------"<<endl;
 
-    int numBytesSent4 = send(m_sockfd, publicKey, key_len, 0);
+
+    int numBytesSent4 = send(m_sockfd, pubKey_msg,strlen((char*)pubKey_msg), 0);
     free(publicKey);
     if (numBytesSent4 < 0) { // send failed
         cout<<"Error sending DH public key"<<endl;
@@ -690,6 +688,41 @@ bool TcpClient::authenticateServer() {
         cout<<"Error sending DH public key, not all bytes sent"<<endl;
         return false;
     }
+
+    //Now waits for the DH public key of the server with the nonce
+    unsigned char msg[MAX_PACKET_SIZE];
+    memset(msg,0,MAX_PACKET_SIZE);
+    int numOfBytesReceived2 = recv(m_sockfd, msg, MAX_PACKET_SIZE, 0);
+
+    if(numOfBytesReceived2 < 1) {
+        cout<<"Error receiving the DH public key msg"<<endl;
+        return false;
+    }
+
+    
+    cout<<"Server's DH pubkey received:"<<endl;
+    cout<< msg+NONCE_LEN;
+
+    unsigned char* nonce_extracted = (unsigned char*)malloc(NONCE_LEN);
+
+    //retrieve nonce
+    memcpy(nonce_extracted,msg,NONCE_LEN);
+
+    cout<<"-----------------"<<endl;
+    cout<<"Nonce extracted:"<<endl;
+    BIO_dump_fp(stdout,(char*)nonce_extracted,NONCE_LEN);
+
+    if(strcmp((char*)nonce_extracted,(char*)nonce2) != 0) {
+        cout<<"Nonces are different"<<endl;
+        return false;
+    }
+
+    cout<<"Nonces comparison successed"<<endl;
+    cout<<"-----------------"<<endl;
+
+    // We have to extract the public key from the buffer
+    EVP_PKEY* serverDHPubKey = pem_deserialize_pubkey(msg+NONCE_LEN,numOfBytesReceived2-NONCE_LEN);
+    serverDHKey = serverDHPubKey;
 
     cout<<"Authentication phase ended, DH keys exchanged successfully"<<endl;
     cout<<"-----------------"<<endl;

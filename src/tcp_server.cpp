@@ -859,10 +859,12 @@ pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client, unsigned char* nonc
 
     unsigned char pubkey_dh_msg[MAX_PACKET_SIZE];
     memset(pubkey_dh_msg,0,MAX_PACKET_SIZE);
-    int numOfBytesReceived = recv(client.getFileDescriptor(), pubkey_dh_msg, MAX_PACKET_SIZE, 0);;
+    int numOfBytesReceived = recv(client.getFileDescriptor(), pubkey_dh_msg, MAX_PACKET_SIZE, 0);
+
+    cout<<"Receiving client DH pubkey message . . ."<<endl;
 
     cout << "Num of bytes received: " << numOfBytesReceived << endl;
-    cout << "Encrypted message: " << pubkey_dh_msg << endl;
+    cout<<"-----------------"<<endl;
 
     if(numOfBytesReceived < 1) {
         ret.msg = "Error receinving the dh public key";
@@ -870,20 +872,23 @@ pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client, unsigned char* nonc
         return ret;
     }
 
-    cout<<"-----------------"<<endl;
-    cout<<"Receiving client DH pubkey message . . ."<<endl;
+    
 
     unsigned char* decrypted = asymmetric_dec(pubkey_dh_msg,numOfBytesReceived,getServerPrivKey(),serverRSApubkey);
+
 
     //Retrive nonce
 
     memcpy(nonce2,decrypted,NONCE_LEN);
 
+    cout<<"-----------------"<<endl;
     cout<<"Nonce extracted: "<<endl;
     BIO_dump_fp(stdout,(char*)nonce2,NONCE_LEN);
 
+    cout.flush();
+
     cout << "Client DH pubkey message: " << endl;
-    cout<< pubkey_dh_msg + NONCE_LEN; 
+    cout<< decrypted + NONCE_LEN<<endl;
     cout<<"-----------------"<<endl;
 
     EVP_PKEY* pubkeyDH = pem_deserialize_pubkey(decrypted + NONCE_LEN,numOfBytesReceived-NONCE_LEN);
@@ -974,6 +979,8 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
         }
 
         cout << "Signature verified correctly! Client is authorized." << endl;
+        cout<<"-----------------"<<endl;
+
         ret.success = true;
 
         int sendByteAck = send(client.getFileDescriptor(),"ACK",strlen("ACK"),0);
@@ -1020,7 +1027,9 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client,unsigned char* nonce2){
     size_t encrypted_len;
 
     unsigned char* encrypted_envelope = asymmetric_enc(publicKey_msg,NONCE_LEN+publickey_len,client.getClientKeyRSA(),&encrypted_len);
-    cout << "Server encrypted message: " << encrypted_envelope << endl;
+    cout << "Server encrypted message: " <<endl;
+    BIO_dump_fp(stdout,(char*)encrypted_envelope,strlen((char*)encrypted_envelope));
+    cout<<"-----------------"<<endl;
 
     int numBytesSent2 = send(client.getFileDescriptor(), encrypted_envelope, encrypted_len, 0);
     if (numBytesSent2 < 0) { // send failed

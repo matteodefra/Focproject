@@ -583,9 +583,7 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
 
 unsigned char* asymmetric_enc(unsigned char* msg_to_enc, int numBytes, EVP_PKEY* publickey, size_t *length){
     
-    cout << "---------------" << endl;
-    cout << "Starting asym encryption" << endl;
-    cout << "---------------" << endl;
+    cout << "------ASYMMETRIC ENCRYPTION------"<<endl;
     
     unsigned char* encrypted_key = (unsigned char*)malloc(EVP_PKEY_size(publickey));
     int encrypted_key_len;
@@ -629,20 +627,14 @@ unsigned char* asymmetric_enc(unsigned char* msg_to_enc, int numBytes, EVP_PKEY*
     memcpy(buffer+pos,iv,iv_len);
     pos += iv_len;
 
-    cout << "IV len in encryption: " << iv_len << endl;
-
     //copy key
 
     memcpy(buffer+pos,encrypted_key,encrypted_key_len);
     pos += encrypted_key_len;
 
-    cout << "Encrypted symmetric key len in encryption: " << encrypted_key_len << endl;
-
     //copy ciphertext
 
     memcpy(buffer+pos,ciphertext,cipherlen);
-
-    cout << "Encrypted message len: " << endl;
 
     cout << "Len of the encrypted buffer: " << iv_len+encrypted_key_len+cipherlen << endl;
 
@@ -654,6 +646,8 @@ unsigned char* asymmetric_enc(unsigned char* msg_to_enc, int numBytes, EVP_PKEY*
     free(encrypted_key);
     free(ciphertext);
 
+    cout<<"Encrypted message successfully"<<endl;
+
     return buffer;
 }
 
@@ -662,6 +656,7 @@ unsigned char* asymmetric_enc(unsigned char* msg_to_enc, int numBytes, EVP_PKEY*
 unsigned char* asymmetric_dec(unsigned char* msg, int msg_len, EVP_PKEY* privatekey,EVP_PKEY* publickey){
 
     // int msg_len = strlen((char*)msg);
+    cout << "------ASYMMETRIC DECRYPTION------"<<endl;
     cout << "Priv key: " << privatekey << endl;
 
     //Retrieve IV
@@ -719,6 +714,8 @@ unsigned char* asymmetric_dec(unsigned char* msg, int msg_len, EVP_PKEY* private
     free(iv);
     free(encrypted_key);
     free(ciphertext);
+
+    cout<<"Message decrypted correctly"<<endl;
 
     return plaintext;
 }

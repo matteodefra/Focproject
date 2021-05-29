@@ -53,11 +53,17 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
 
     //:CERT request message
 
-    unsigned char cert_req_msg[MAX_PACKET_SIZE];
+    char cert_req_msg[MAX_PACKET_SIZE];
     int numOfBytesReceived = recv(client.getFileDescriptor(), cert_req_msg, MAX_PACKET_SIZE, 0);;
 
     if(numOfBytesReceived < 1) {
         ret.msg = "Error receinving the certificate request";
+        ret.success = false;
+        return ret;
+    }
+
+    bool val = inputSanitization(cert_req_msg);
+    if (!val) {
         ret.success = false;
         return ret;
     }
@@ -70,7 +76,7 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
 
     cout<<"Certificate Request received."<<endl;
 
-    unsigned char* nonce = (unsigned char*)malloc(NONCE_LEN);
+    unsigned char* nonce = new unsigned char[NONCE_LEN];
 
     ret = sendCertificate(client,nonce);
     if(ret.success == false) return ret;
@@ -80,7 +86,7 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
     
     free(nonce);
 
-    unsigned char* nonce2 = (unsigned char*)malloc(NONCE_LEN);
+    unsigned char* nonce2 = new unsigned char[NONCE_LEN];
 
     ret = receiveClientPubkeyDH(client,nonce2);
     if(ret.success == false) return ret;
@@ -149,6 +155,9 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                 else{
 
                     unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH());
+
+                    bool val = inputSanitization((char*)plaintext_buffer);
+                    if (!val) return;
 
                     cout << "<" << client->getClientName() <<"> " << plaintext_buffer << endl;
 
@@ -401,7 +410,7 @@ void setClientPublicKey(Client &client, char *username) {
     string path = "./AddOn/" + name + "_pubRSA.pem";    
 
 
-    FILE *file = fopen(path.c_str(),"r");
+    FILE *file = fopen(path.c_str(),"rx");
     if (!file) {
         handleErrors();
     }
@@ -432,6 +441,13 @@ pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
 
     pipe_ret_t ret;
 
+    // Sanitize the possible tainted user message
+    if (msg.find_first_not_of(ok_chars) != string::npos) {
+        cout << "Bad user!" << endl;
+        ret.success = false;
+        return ret;
+    }
+
     //Retrieve username from msg
 
     char *pointer = strtok((char*)msg.c_str()," ");
@@ -444,6 +460,7 @@ pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
     }
 
     username = (char*)words.at(1).c_str();
+
 
     ifstream myfile;
     myfile.open ("./AddOn/users.txt");
@@ -730,7 +747,7 @@ pipe_ret_t TcpServer::start(int port) {
 
     // Load server private key
     string path = "./AddOn/ChatBox/ChatBox_App_key.pem"; 
-    FILE *file = fopen(path.c_str(),"r");
+    FILE *file = fopen(path.c_str(),"rx");
     if (!file) handleErrors();
 
     EVP_PKEY *privkey = PEM_read_PrivateKey(file,NULL,NULL,NULL);
@@ -929,7 +946,6 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
         return ret;
     }
     else {
-        
         auto *clear_buf = new unsigned char[strlen(client.getClientName().c_str()) + NONCE_LEN];
 
         cout << "Nonce to verify: " <<endl;
@@ -1061,7 +1077,7 @@ pipe_ret_t TcpServer::sendCertificate(Client & client,unsigned char* nonce){
     // READ CERTIFICATE 
 
     X509* server_cert;
-    FILE* server_file = fopen("./AddOn/ChatBox/ChatBox_App_cert.pem","r");
+    FILE* server_file = fopen("./AddOn/ChatBox/ChatBox_App_cert.pem","rx");
     if(!server_file) { 
         ret.success = false;
         ret.msg = "Error opening certificate file";

@@ -18,6 +18,19 @@ using namespace std;
 #define NONCE_LEN 16
 #define AAD_LEN 12
 
+static char ok_chars[] = "abcdefghijklmnopqrstuvwxyz"
+                         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                         "1234567890 :";
+
+
+bool inputSanitization(char *msg) {
+    if (strspn(msg,ok_chars) < strlen(msg)) {
+        return false;
+    }
+    return true;
+}
+
+
 /**
  * Utility function to handle OPENSSL errors
  */
@@ -395,6 +408,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     EVP_MD_CTX* digest_ctx;
     /* Buffer allocation for the digest */
     digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
+    if (!digest) return NULL;
     /* Context allocation */
     digest_ctx = EVP_MD_CTX_new();
 
@@ -407,7 +421,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
 
     // Taking first 128 bits of the digest
     // Get first 16 bytes of shared secret, to use as key in AES
-    unsigned char *key = (unsigned char*)malloc(16);
+    unsigned char *key = new unsigned char[16];//(unsigned char*)malloc(16);
     memcpy(key,digest,16);
 
     free(secret);
@@ -443,7 +457,9 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     int pt_len = strlen(msg);
 
     cphr_buf = (unsigned char*)malloc(size);
+    if (!cphr_buf) return nullptr;
     tag_buf = (unsigned char*)malloc(16);
+    if (!tag_buf) return nullptr;
     cphr_len = gcm_encrypt(msg2,pt_len,aad_gcm,AAD_LEN,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
 
     auto *buffer = new unsigned char[AAD_LEN/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
@@ -522,6 +538,7 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
     EVP_MD_CTX* digest_ctx;
     /* Buffer allocation for the digest */
     digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
+    if (!digest) return nullptr;
     /* Context allocation */
     digest_ctx = EVP_MD_CTX_new();
 
@@ -535,6 +552,7 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
     // Taking first 128 bits of the digest
     // Get first 16 bytes of shared secret, to use as key in AES
     unsigned char *key = (unsigned char*)malloc(16);
+    if (!key) return nullptr;
     memcpy(key,digest,16);
 
     free(secret);
@@ -563,7 +581,7 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
     memcpy(tag, msg+pos, tag_len);
     pos += tag_len;
 
-    unsigned char *plaintext_buffer = (unsigned char*)malloc(encrypted_len+1);
+    unsigned char *plaintext_buffer = new unsigned char[encrypted_len+1];//(unsigned char*)malloc(encrypted_len+1);
 
     // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
     cout<<"AES GCM decryption . . ."<<endl;
@@ -586,13 +604,16 @@ unsigned char* asymmetric_enc(unsigned char* msg_to_enc, int numBytes, EVP_PKEY*
     cout << "------ASYMMETRIC ENCRYPTION------"<<endl;
     
     unsigned char* encrypted_key = (unsigned char*)malloc(EVP_PKEY_size(publickey));
+    if (!encrypted_key) return NULL;
     int encrypted_key_len;
 
     unsigned char* ciphertext = (unsigned char*)malloc(numBytes + 16);
+    if (!ciphertext) return NULL;
     int outlen, cipherlen;
 
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     unsigned char* iv = (unsigned char*)malloc(EVP_CIPHER_iv_length(EVP_aes_128_cbc()));
+    if (!iv) return NULL;
     int iv_len = EVP_CIPHER_iv_length(EVP_aes_128_cbc());
     int ret = EVP_SealInit(ctx,EVP_aes_128_cbc(),&encrypted_key, &encrypted_key_len, iv, &publickey,1);
 
@@ -662,6 +683,7 @@ unsigned char* asymmetric_dec(unsigned char* msg, int msg_len, EVP_PKEY* private
     //Retrieve IV
 
     unsigned char* iv = (unsigned char*)malloc(EVP_CIPHER_iv_length(EVP_aes_128_cbc()));
+    if (!iv) return NULL;
     int iv_len = EVP_CIPHER_iv_length(EVP_aes_128_cbc());
 
     int pos = 0;
@@ -673,6 +695,7 @@ unsigned char* asymmetric_dec(unsigned char* msg, int msg_len, EVP_PKEY* private
     //Retrive encrypted_key
 
     unsigned char* encrypted_key = (unsigned char*)malloc(EVP_PKEY_size(publickey));
+    if (!encrypted_key) return NULL;
     int encrypted_key_len = EVP_PKEY_size(privatekey);
     
     memcpy(encrypted_key,msg+pos,encrypted_key_len);
@@ -685,11 +708,13 @@ unsigned char* asymmetric_dec(unsigned char* msg, int msg_len, EVP_PKEY* private
 
     int cipherlen = msg_len-iv_len-encrypted_key_len;
     unsigned char* ciphertext = (unsigned char*)malloc(cipherlen);
+    if (!ciphertext) return NULL;
     memcpy(ciphertext,msg+pos,cipherlen);
 
     cout << "Ciphertext len in decryption: " << cipherlen << endl;
 
     unsigned char* plaintext = (unsigned char*)malloc(cipherlen);
+    if (!plaintext) return NULL;
     int outlen, plainlen;
 
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();

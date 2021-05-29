@@ -50,7 +50,7 @@ unsigned char* TcpClient::pswHash(string msg, bool reg){
     const EVP_MD* hash_function = EVP_sha256();
     unsigned int digest_len;
 
-    unsigned char* digest = (unsigned char*)malloc(EVP_MD_size(hash_function));
+    unsigned char* digest = new unsigned char[EVP_MD_size(hash_function)];//(unsigned char*)malloc(EVP_MD_size(hash_function));
 
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     EVP_DigestInit(ctx,hash_function);
@@ -236,7 +236,7 @@ void TcpClient::saveMyKey() {
     cout << "Path to private RSA key: " << path << endl;
     cout<<"-----------------"<<endl;
  
-    FILE *file = fopen(path.c_str(),"r");
+    FILE *file = fopen(path.c_str(),"rx");
     if (!file) {
         finish();
         handleErrors();
@@ -306,7 +306,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         if (strncmp(msg,":USER",5) == 0) {
 
             char *copy = (char*) malloc(size);
-            strcpy(copy,msg);
+            strncpy(copy,msg,size);
             char *pointer = strtok(copy," ");
             pointer = strtok(NULL, " ");
             setClientName(pointer);
@@ -454,7 +454,7 @@ bool TcpClient::authenticateServer() {
     X509* cert_ca;
     X509_CRL* crl_ca;
 
-    FILE* cert_file = fopen("./AddOn/CA/Certificates_CA_cert.pem","r");
+    FILE* cert_file = fopen("./AddOn/CA/Certificates_CA_cert.pem","rx");
     if(!cert_file) { 
         cout<<"Error opening the CA certificate file"<<endl;
         return false;
@@ -466,7 +466,7 @@ bool TcpClient::authenticateServer() {
     }
     fclose(cert_file);
 
-    FILE* crl_file = fopen("./AddOn/CA/Certificates_CA_crl.pem","r");
+    FILE* crl_file = fopen("./AddOn/CA/Certificates_CA_crl.pem","rx");
     if(!crl_file){
         cout<<"Error opening the CA CRL file"<<endl;
         return false;
@@ -524,6 +524,7 @@ bool TcpClient::authenticateServer() {
 
     //Get nonce
     unsigned char* nonce = (unsigned char*)malloc(NONCE_LEN);
+    if (!nonce) return false;
 
     int pos = 0;
 
@@ -648,6 +649,7 @@ bool TcpClient::authenticateServer() {
     RAND_poll();
 
     unsigned char* nonce2 = (unsigned char*)malloc(NONCE_LEN);
+    if (!nonce2) return false;
 
     cout<<"Creating a nonce . . ."<<endl;
     int result = RAND_bytes(nonce2,NONCE_LEN);
@@ -718,7 +720,7 @@ bool TcpClient::authenticateServer() {
 
     unsigned char* decrypted_message = asymmetric_dec(msg,numOfBytesReceived2,mykey_RSA,serverRSAKey);
 
-    unsigned char* nonce_extracted = (unsigned char*)malloc(NONCE_LEN);
+    unsigned char* nonce_extracted = new unsigned char[NONCE_LEN];//(unsigned char*)malloc(NONCE_LEN);
 
     cout.flush();
 

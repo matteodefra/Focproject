@@ -24,8 +24,16 @@ Open one terminal for the server and one or more terminal for the clients.
 ## Users to try
 
 * Marc:
-    i) Username = marc
-    ii) Password to retrieve private key = marc
-    iii) Service password = marc
+    * Username = marc
+    * Password to retrieve private key = marc
+    * Service password for the login = marc
 
-The same choice have been done with users "nick" and "admin. 
+* Nick:
+    * Username = nick
+    * Password to retrieve private key = nick
+    * Service password for the login = nick
+
+* Admin:
+    * Username = admin
+    * Password to retrieve private key = admin
+    * Service password for the login = admin 

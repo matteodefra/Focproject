@@ -20,3 +20,12 @@ Open one terminal for the server and one or more terminal for the clients.
 * Client:
 
 > ./build/client_example
+
+## Users to try
+
+* Marc:
+    i) Username = marc
+    ii) Password to retrieve private key = marc
+    iii) Service password = marc
+
+The same choice have been done with users "nick" and "admin. 

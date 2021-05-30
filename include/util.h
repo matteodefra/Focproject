@@ -18,6 +18,10 @@ using namespace std;
 #define NONCE_LEN 16
 #define AAD_LEN 12
 
+/**
+ *  Server side input validation
+ */
+
 static char ok_chars[] = "abcdefghijklmnopqrstuvwxyz"
                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                          "1234567890 :";

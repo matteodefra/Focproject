@@ -84,7 +84,7 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
     ret = verifySignature(client,nonce);
     if(ret.success == false) return ret;
     
-    free(nonce);
+    delete nonce;
 
     unsigned char* nonce2 = new unsigned char[NONCE_LEN];
 
@@ -102,6 +102,7 @@ pipe_ret_t TcpServer::authenticationStart(Client& client, string msg) {
     cout<<endl;
     ret.msg = "Authentication completed, DH keys exchanged";
     ret.success = true;
+    delete nonce2;
     return ret;
 }
 
@@ -157,13 +158,19 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH());
 
                     bool val = inputSanitization((char*)plaintext_buffer);
-                    if (!val) return;
+                    if (!val) {
+                        Client &receiver = getClient(*client);
+                        string answer = "Error: special characters are not allowed";
+                        sendToClient(receiver,(char*)answer.c_str(),answer.size());
+                        delete plaintext_buffer;
+                        return;
+                    }
 
                     cout << "<" << client->getClientName() <<"> " << plaintext_buffer << endl;
 
                     // Process client request 
                     processRequest(*client,(char*)plaintext_buffer);
-                    free(plaintext_buffer);
+                    delete plaintext_buffer;
                 }
                 
 
@@ -494,8 +501,7 @@ pipe_ret_t TcpServer::checkClientIdentity(Client& client, string msg){
         }
         if ((uint)numBytesSent < response.size()) { // not all bytes were sent
         ret.success = false;
-        char err_msg[100];
-        sprintf(err_msg, "Only %d bytes out of %lu was sent to client", numBytesSent, response.size());
+        string err_msg = "Not all the bytes were sent to client";
         ret.msg = err_msg;
         return ret;
         }
@@ -635,6 +641,10 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
 
                 ret = sendToClient(requestingClient,(char*)messageOne,strlen((char*)messageOne));
                 ret = sendToClient(client,(char*)messageTwo,strlen((char*)messageTwo));
+
+                delete messageOne;
+                delete messageTwo;
+
                 client.resetRequest();
             }
         }
@@ -999,6 +1009,8 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 
         ret.success = true;
 
+        delete clear_buf;
+
         int sendByteAck = send(client.getFileDescriptor(),"ACK",strlen("ACK"),0);
 
         return ret;
@@ -1043,6 +1055,9 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client,unsigned char* nonce2){
     size_t encrypted_len;
 
     unsigned char* encrypted_envelope = asymmetric_enc(publicKey_msg,NONCE_LEN+publickey_len,client.getClientKeyRSA(),&encrypted_len);
+
+    delete publicKey_msg;
+
     cout << "Server encrypted message: " <<endl;
     BIO_dump_fp(stdout,(char*)encrypted_envelope,strlen((char*)encrypted_envelope));
     cout<<"-----------------"<<endl;
@@ -1055,8 +1070,7 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client,unsigned char* nonce2){
     }
     if ((uint)numBytesSent2 < encrypted_len) { // not all bytes were sent
         ret.success = false;
-        char msg[100];
-        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent2, key_len);
+        string msg = "Not all the bytes were sent to client";
         ret.msg = msg;
         return ret;
     }
@@ -1140,14 +1154,13 @@ pipe_ret_t TcpServer::sendCertificate(Client & client,unsigned char* nonce){
     }
     if ((uint)numBytesSent < NONCE_LEN + cert_len) { // not all bytes were sent
         ret.success = false;
-        char msg[100];
-        sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, cert_len);
+        string msg = "Not all the bytes were sent to client";
         ret.msg = msg;
         return ret;
     }
     ret.success = true;
     
-
+    delete buffer;
     OPENSSL_free(certificate);
     
     return ret;
@@ -1173,8 +1186,7 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
         }
         if ((uint)numBytesSent < size) { // not all bytes were sent
             ret.success = false;
-            char msg[100];
-            sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
+            string msg = "Not all the bytes were sent to client";
             ret.msg = msg;
             return ret;
         }
@@ -1204,8 +1216,7 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
         }
         if ((uint)numBytesSent < size) { // not all bytes were sent
             ret.success = false;
-            char msg[100];
-            sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
+            string msg = "Not all the bytes were sent to client";
             ret.msg = msg;
             return ret;
         }

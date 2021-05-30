@@ -282,7 +282,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 
         // Change name accordingly
         int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
-        free(buffer);
+        delete buffer;
         if (numBytesSent < 0 ) { // send failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -290,8 +290,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         }
         if ((uint)numBytesSent < size) { // not all bytes were sent
             ret.success = false;
-            char msg[100];
-            sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
+            string msg = "Not all the bytes were sent to client";
             ret.msg = msg;
             return ret;
         }
@@ -305,7 +304,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         // First message (which must be user) allow us to store the client name and access its private key
         if (strncmp(msg,":USER",5) == 0) {
 
-            char *copy = (char*) malloc(size);
+            char *copy =  new char[size];
             strncpy(copy,msg,size);
             char *pointer = strtok(copy," ");
             pointer = strtok(NULL, " ");
@@ -313,7 +312,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
             if(strcmp(pointer,"admin") == 0) setAdmin();
             saveMyKey();
 
-            free(copy);
+            delete copy;
 
             cout << "Saved key successful" << endl;
             cout<<"-----------------"<<endl;
@@ -329,8 +328,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
             }
             if ((uint)numBytesSent < size) { // not all bytes were sent
                 ret.success = false;
-                char msg[100];
-                sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
+                string msg = "Not all the bytes were sent to client";
                 ret.msg = msg;
                 return ret;
             }
@@ -346,7 +344,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         cout<<"-----------------"<<endl;
         // Change name accordingly
         int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
-        free(buffer);
+        delete buffer;
         if (numBytesSent < 0 ) { // send failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -354,8 +352,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         }
         if ((uint)numBytesSent < size) { // not all bytes were sent
             ret.success = false;
-            char msg[100];
-            sprintf(msg, "Only %d bytes out of %lu was sent to client", numBytesSent, size);
+            string msg = "Not all the bytes were sent to client";
             ret.msg = msg;
             return ret;
         }
@@ -523,7 +520,7 @@ bool TcpClient::authenticateServer() {
     cout.flush();
 
     //Get nonce
-    unsigned char* nonce = (unsigned char*)malloc(NONCE_LEN);
+    unsigned char* nonce =  new unsigned char[NONCE_LEN];
     if (!nonce) return false;
 
     int pos = 0;
@@ -590,7 +587,7 @@ bool TcpClient::authenticateServer() {
 
     EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
 
-    signature = (unsigned char*)malloc(EVP_PKEY_size(mykey_RSA));
+    signature =  new unsigned char[EVP_PKEY_size(mykey_RSA)];
     if (!signature) {
         cout << "ERROR!" << endl;
         ERR_print_errors_fp(stderr);
@@ -617,15 +614,16 @@ bool TcpClient::authenticateServer() {
         return false;   
     }
 
+    delete sendMsg;
     EVP_MD_CTX_free(md_ctx);
 
     cout << "Sending the client message signed . . ."<< endl;
     
     // Server nonce not necessary anymore
-    free(nonce);
+    delete nonce;
 
     int numBytesSent3 = send(m_sockfd, signature, signature_len, 0);
-    free(signature);
+    delete signature;
 
     if (numBytesSent3 < 0 ) { // send failed
         cout<<"Error sending the signature"<<endl;
@@ -648,7 +646,7 @@ bool TcpClient::authenticateServer() {
 
     RAND_poll();
 
-    unsigned char* nonce2 = (unsigned char*)malloc(NONCE_LEN);
+    unsigned char* nonce2 =  new unsigned char[NONCE_LEN];
     if (!nonce2) return false;
 
     cout<<"Creating a nonce . . ."<<endl;
@@ -685,6 +683,8 @@ bool TcpClient::authenticateServer() {
     size_t encrypted_len;
 
     unsigned char *encrypted = asymmetric_enc(pubKey_msg,NONCE_LEN+pubkey_len,serverRSAKey,&encrypted_len);
+
+    delete pubKey_msg;
 
     cout << "Length of encrypted buffer after function call: " << encrypted_len << endl;
     cout << "Encrypted message: "<<endl;
@@ -743,6 +743,7 @@ bool TcpClient::authenticateServer() {
     cout<<"Nonces comparison successed"<<endl;
     cout<<"-----------------"<<endl;
 
+    delete nonce_extracted;
     // We have to extract the public key from the buffer
     EVP_PKEY* serverDHPubKey = pem_deserialize_pubkey(decrypted_message+NONCE_LEN,numOfBytesReceived2-NONCE_LEN);
     serverDHKey = serverDHPubKey;
@@ -791,7 +792,7 @@ void TcpClient::ReceiveTask() {
 
                 // Based on message received, we need to perform some action
                 processRequest(plaintext_buffer);
-                free(plaintext_buffer);
+                delete plaintext_buffer;
             }
 
             else {
@@ -802,7 +803,7 @@ void TcpClient::ReceiveTask() {
 
                 // Based on message received, we need to perform some action
                 processRequest(plaintext_buffer);
-                free(plaintext_buffer);
+                delete plaintext_buffer;
             }
         }
     }

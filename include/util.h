@@ -9,7 +9,10 @@
 #include <openssl/pem.h>
 #include <openssl/rand.h>
 #include <cstring>
+#include <sstream>
 #include <iostream>
+#include <fstream>
+
 
 using namespace std;
 
@@ -17,6 +20,21 @@ using namespace std;
 #define IV_LEN EVP_CIPHER_iv_length(EVP_aes_128_gcm())
 #define NONCE_LEN 16
 #define AAD_LEN 12
+
+#define DECRYPTUSERS " \
+#/bin/bash \n \
+openssl enc -d -aes-256-cbc -in ./AddOn/users.txt.enc -out ./AddOn/users.txt -pass file:./AddOn/ChatBox/ChatBox_App_key.pem \
+"
+
+#define ENCRYPTUSERS " \
+#/bin/bash \n \
+openssl enc -aes-256-cbc -in ./AddOn/users.txt -out ./AddOn/users.txt.enc -pass file:./AddOn/ChatBox/ChatBox_App_key.pem \
+"
+
+#define RMUSERSDECRYPTED " \
+#/bin/bash \n \
+rm ./AddOn/users.txt \
+"
 
 /**
  *  Server side input validation

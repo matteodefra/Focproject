@@ -16,6 +16,20 @@ TcpServer server;
 // the server supports multiple observers
 server_observer_t observer1, observer2;
 
+
+// on sig_exit, close client
+void sig_exit(int s)
+{
+	cout << "Closing server..." << std::endl;
+	pipe_ret_t finishRet = server.finish();
+	if (finishRet.success) {
+		cout << "Server closed." << std::endl;
+	} else {
+		cout << "Failed to close server." << std::endl;
+	}
+	exit(0);
+}
+
 // observer callback. will be called for every new message received by clients
 // with the requested IP address
 void onIncomingMsg1(Client & client, const char * msg, size_t size) {
@@ -78,6 +92,8 @@ void onClientDisconnected(Client & client) {
 
 int main(int argc, char *argv[])
 {
+    signal(SIGINT, sig_exit);
+
     // start server on port 65123
     pipe_ret_t startRet = server.start(65123);
     if (startRet.success) {

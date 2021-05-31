@@ -12,6 +12,25 @@ using namespace std;
 
 TcpClient client;
 
+
+/**
+ *  Function to sanitize client input, no symbols allowed.
+ * 
+ */
+
+char static ok_charsMain[] =        "abcdefghijklmnopqrstuvwxyz"
+                         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                         "1234567890 :";
+
+
+
+bool inputSanitizationMain(char *msg) {
+    if (strspn(msg,ok_charsMain) < strlen(msg)) {
+        return false;
+    }
+    return true;
+}
+
 /**
  * Convert "str" into hex, hexstr will contain the converted string
  */
@@ -112,13 +131,20 @@ int main() {
         int valid = 0;
         if(!client.getChatting()) valid = client.checkCommandValidity(msg); //if it is talking to the server, only a set of commands can be performed
         if(valid >= 0){
+            if(!client.getChatting()){
+                bool input_val = inputSanitizationMain((char*)msg.c_str());
+                if (!input_val) {
+                    cout<<"<Chatbox>: Error, special characters are not allowed in commands, try again"<<endl;
+                    continue;
+                }
+            }
             if(valid >= 1){
                 unsigned char* digest;
                 if(valid == 1) digest = client.pswHash(msg,false);
                     else digest = client.pswHash(msg,true);
                 string hex_digest;
                 stream2hex((char*)digest,hex_digest);
-                free(digest);
+                delete digest;
                 cout<<"Password Hash: "<<hex_digest<<endl;
                 msg = insertHash(msg,hex_digest);
             }

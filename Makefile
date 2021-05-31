@@ -4,8 +4,8 @@ LDLIBS=-lcrypto
 AR=ar
 ARFLAGS=rvs
 
-TARGETS 			=	build/server_example \
-						build/client_example
+TARGETS 			=	build/server_main \
+						build/client_main
 
 
 OBJECTSSERVER	=	build/tcp_server.o \
@@ -28,7 +28,7 @@ INCLUDE_CLIENT= include/util.h \
 				include/pipe_ret_t.h
 
 
-.PHONY: all clean test
+.PHONY: all clean test directories
 
 .SUFFIXES: .cpp .h
 
@@ -45,14 +45,14 @@ build/%.o: src/%.cpp
 	g++ $(CFLAGS) $(INCLUDES) $(LDFLAGS) -c -o $@ $< $(LDLIBS) 
 
 
-all: $(TARGETS)
+all: directories $(TARGETS)
 
 
-build/server_example: build/server_example.o build/libserver.a $(INCLUDE_SERVER)
+build/server_main: build/server_main.o build/libserver.a $(INCLUDE_SERVER)
 	g++ $(CPPFLAGS) $(INCLUDES) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 
-build/client_example: build/client_example.o build/libclient.a $(INCLUDE_CLIENT)
+build/client_main: build/client_main.o build/libclient.a $(INCLUDE_CLIENT)
 	g++ $(CPPFLAGS) $(INCLUDES) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 
@@ -66,3 +66,6 @@ build/libclient.a: $(OBJECTSCLIENT)
 
 clean:
 	rm -rf build/*
+
+directories:
+	mkdir -p build

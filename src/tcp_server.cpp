@@ -221,11 +221,12 @@ bool checkUsername(string username){
     myfile.open ("./AddOn/users.txt");
     if (!myfile.is_open()) {
       cout<<"ERROR: File open"<<endl;
+      system(RMUSERSDECRYPTED);
       return false;
     }
     string user, password;
     while (myfile >> user >> password){
-        if(user.compare(username) == 0) return false; 
+        if(user.compare(username) == 0) return false;
     }   
     myfile.close();
 
@@ -238,6 +239,7 @@ bool checkUsername(string username){
  * 
  */
 bool insertCredentials(string username, string psw){
+  
   ofstream myfile;
   myfile.open ("./AddOn/users.txt", ios::app);
   if (!myfile.is_open()) {
@@ -246,6 +248,7 @@ bool insertCredentials(string username, string psw){
   }
   myfile << username << " "<< psw<<endl;
   myfile.close();
+
   return true;
 }
 
@@ -543,7 +546,8 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
             // Cannot start a request-to-talk until a login is provided
             string response = "You must be logged before issuing this command";
             ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
-        } else{
+        }
+        else{
             Client& receivingClient = sendRequest(client,request);
             if (receivingClient == client) {
                 // Client is not connected or not logged
@@ -551,11 +555,17 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
                 ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
             }
             else {
-                // Client is connected: send message
-                string response = "Request-to-talk from " + client.getClientName() + "; Do you want to accept?";
-                storeRequestingInfo(receivingClient,client);
-                ret = sendToClient(receivingClient,response.c_str(),strlen(response.c_str()));
-                receivingClient.setRequest();
+                if (receivingClient.isChatting()) {
+                    string response = "Client is already chatting";
+                    ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
+                }
+                else {
+                    // Client is connected: send message
+                    string response = "Request-to-talk from " + client.getClientName() + "; Do you want to accept?";
+                    storeRequestingInfo(receivingClient,client);
+                    ret = sendToClient(receivingClient,response.c_str(),strlen(response.c_str()));
+                    receivingClient.setRequest();
+                }
             }
         }
        
@@ -763,11 +773,9 @@ pipe_ret_t TcpServer::start(int port) {
     EVP_PKEY *privkey = PEM_read_PrivateKey(file,NULL,NULL,NULL);
     if (!privkey) handleErrors(); 
     setServerPrivKey(privkey);
-
-    // !!!!!
-    // EVP_PKEY_free(privkey);
-
     fclose(file);
+
+    system(DECRYPTUSERS);
 
     // Load server DH keypair
     loadServerDHKeys();
@@ -1233,6 +1241,10 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
  */
 pipe_ret_t TcpServer::finish() {
     pipe_ret_t ret;
+
+    system(ENCRYPTUSERS);
+    system(RMUSERSDECRYPTED);
+
     for (uint i=0; i<m_clients.size(); i++) {
         m_clients[i].setDisconnected();
         EVP_PKEY_free(m_clients[i].getClientKeyDH());

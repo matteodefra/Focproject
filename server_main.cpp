@@ -14,7 +14,7 @@ TcpServer server;
 
 // declare a server observer which will receive incoming messages.
 // the server supports multiple observers
-server_observer_t observer1, observer2;
+server_observer_t observer1;
 
 
 // on sig_exit, close client
@@ -30,64 +30,9 @@ void sig_exit(int s)
 	exit(0);
 }
 
-// observer callback. will be called for every new message received by clients
-// with the requested IP address
-void onIncomingMsg1(Client & client, const char * msg, size_t size) {
-    std::string msgStr = msg;
-    // print the message content
-    std::cout << "Observer1 got client msg: " << msgStr << std::endl;
-    // if client sent the string "quit", close server
-    // else if client sent "print" print the server clients
-    // else just print the client message
-
-    // Discretization message
-    if (msgStr.find("quit") != std::string::npos) {
-        std::cout << "Closing server..." << std::endl;
-        pipe_ret_t finishRet = server.finish();
-        if (finishRet.success) {
-            std::cout << "Server closed." << std::endl;
-        } else {
-            std::cout << "Failed closing server: " << finishRet.msg << std::endl;
-        }
-    } else if (msgStr.find("print") != std::string::npos){
-        server.printClients();
-    } else if (msgStr.find("requestToTalk") != std::string::npos) {
-        // Server communicate the other client to check acceptance
-        // Separate string and take only the required part
-        // server.communicateRequest(client,msg,size);
-    }
-    else if (msgStr.find("showList") != std::string::npos) {
-        // Server send list to the client that requested it
-        // server.sendList(client, msg, size);
-    }
-    // else if (msgStr.find("logOff") != std::string::npos) {
-
-    // }
-    else {
-        // Forward the message to the other client
-        // server.forwardMessage();
-
-        // std::string replyMsg = "server got this msg: "+ msgStr;
-        // server.sendToAllClients(replyMsg.c_str(), replyMsg.length());
-    }
-}
-
-// observer callback. will be called for every new message received by clients
-// with the requested IP address
-void onIncomingMsg2(Client & client, const char * msg, size_t size) {
-    std::string msgStr = msg;
-    // print client message
-    std::cout << "Observer2 got client msg: " << msgStr << std::endl;
-
-    // reply back to client
-    std::string replyMsg = "server got this msg: "+ msgStr;
-    server.sendToClient(client, msg, size);
-}
-
 // observer callback. will be called when client disconnects
 void onClientDisconnected(Client & client) {
     std::cout << "Client: " << client.getIp() << " disconnected: " << client.getInfoMessage() << std::endl;
-    // EVP_PKEY_free(client.getClientKeyDH());
 }
 
 int main(int argc, char *argv[])
@@ -104,16 +49,16 @@ int main(int argc, char *argv[])
     }
 
     // configure and register observer1
-    observer1.incoming_packet_func = onIncomingMsg1;
+    observer1.incoming_packet_func = nullptr;
     observer1.disconnected_func = onClientDisconnected;
     observer1.wantedIp = "127.0.0.1";
     server.subscribe(observer1);
 
-    // configure and register observer2
-    observer2.incoming_packet_func = onIncomingMsg2;
-    observer1.disconnected_func = nullptr; //don't care about disconnection
-    observer2.wantedIp = "10.88.0.11"; // use empty string instead to receive messages from any IP address
-    server.subscribe(observer2);
+    // // configure and register observer2
+    // observer2.incoming_packet_func = onIncomingMsg2;
+    // observer1.disconnected_func = nullptr; //don't care about disconnection
+    // observer2.wantedIp = "10.88.0.11"; // use empty string instead to receive messages from any IP address
+    // server.subscribe(observer2);
 
     // receive clients
     while(1) {

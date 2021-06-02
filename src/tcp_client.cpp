@@ -275,14 +275,16 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
     if (getChatting()) {
         // Derive the shared secret
 
-        auto *buffer = deriveAndEncryptMessage(msg,size,mykey_pub,peerKey);
+        auto *buffer = deriveAndEncryptMessage(msg,size,mykey_pub,peerKey,peerCounter);
+
+        incrementCounter(peerCounter);
 
         cout << "Client, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
 
         // Change name accordingly
         int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
-        delete buffer;
+        delete buffer; 
         if (numBytesSent < 0 ) { // send failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -336,8 +338,12 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
             return ret;
         }
 
+        cout << "Counter for encryption: " << endl;
+        BIO_dump_fp(stdout,(char*)counter,12);
 
-        auto *buffer = deriveAndEncryptMessage(msg,size,mykey_pub,serverDHKey);
+        auto *buffer = deriveAndEncryptMessage(msg,size,mykey_pub,serverDHKey,counter);
+
+        incrementCounter(counter);
 
         cout << "Client, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
@@ -663,13 +669,33 @@ bool TcpClient::authenticateServer() {
     size_t key_len;
     unsigned char* publicKey = pem_serialize_pubkey(mykey_pub,&key_len);
     unsigned int pubkey_len = strlen((char*)publicKey);
-    auto *pubKey_msg = new unsigned char[NONCE_LEN+pubkey_len];
+    
+    // Generating random counter for replay attacks
+    unsigned char* aad_gcm = (unsigned char*)malloc(AAD_LEN);
+
+    RAND_poll();
+    result = RAND_bytes(aad_gcm,AAD_LEN);
+    if (result != 1) {
+        cout << "Core dumped here" << endl;
+        // handleErrors();
+        return false;
+    }    
+    
+    counter = aad_gcm;
+
+    cout << "Communication counter: " << counter << endl;
+    
+    auto *pubKey_msg = new unsigned char[NONCE_LEN+pubkey_len+AAD_LEN];
 
     int position = 0;
 
     //copy nonce
     memcpy(pubKey_msg+position,nonce2,NONCE_LEN);
     position += NONCE_LEN;
+
+    //copy starting counter
+    memcpy((pubKey_msg+position), aad_gcm, AAD_LEN);
+    position += AAD_LEN;
 
     //copy pubkey
     memcpy((pubKey_msg+position), publicKey, pubkey_len);
@@ -682,7 +708,7 @@ bool TcpClient::authenticateServer() {
     // Encrypt pubkey message with digital envelope
     size_t encrypted_len;
 
-    unsigned char *encrypted = asymmetric_enc(pubKey_msg,NONCE_LEN+pubkey_len,serverRSAKey,&encrypted_len);
+    unsigned char *encrypted = asymmetric_enc(pubKey_msg,NONCE_LEN+pubkey_len+AAD_LEN,serverRSAKey,&encrypted_len);
 
     delete pubKey_msg;
 
@@ -788,21 +814,28 @@ void TcpClient::ReceiveTask() {
 
             if (getChatting()) {
 
-                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,peerKey);
+                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,peerKey,peerCounter);
+
+                incrementCounter(peerCounter);
 
                 // Based on message received, we need to perform some action
-                processRequest(plaintext_buffer);
+                processRequest(plaintext_buffer,numOfBytesReceived);
                 delete plaintext_buffer;
             }
 
             else {
                 // Also this part could be included in a utility function returning only the decrypted message
                 
+                cout << "Counter for decryption: " << endl;
+                BIO_dump_fp(stdout,(char*)counter,12);
+
                 
-                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,serverDHKey);
+                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,serverDHKey,counter);
+
+                incrementCounter(counter);
 
                 // Based on message received, we need to perform some action
-                processRequest(plaintext_buffer);
+                processRequest(plaintext_buffer,numOfBytesReceived);
                 delete plaintext_buffer;
             }
         }
@@ -819,14 +852,21 @@ void TcpClient::setAndStorePeerKey(unsigned char* key) {
  * Simple process request to get the :KEY message. When the server send this kind of message, the other peer public key can be found
  * in the tail of the message
  */
-void TcpClient::processRequest(unsigned char* plaintext_buffer) {
+void TcpClient::processRequest(unsigned char* plaintext_buffer, int receivedBytes) {
     char *message = (char*)plaintext_buffer;
 
     if (strncmp(message,":KEY",4) == 0) {
         setChatting();
 
+        peerCounter = (unsigned char*)malloc(AAD_LEN);
+        memcpy(peerCounter,plaintext_buffer+4,AAD_LEN);
+
+        cout << "Peer counter: " << peerCounter << endl;
+
         // Move pointer to key
-        unsigned char *key = (unsigned char*)plaintext_buffer + 5;
+        unsigned char *key = plaintext_buffer + 4 + AAD_LEN;
+
+        cout << "Key peer: " << key << endl;
 
         // When a key message arrives, save the key into tcpclient object
         setAndStorePeerKey(key);

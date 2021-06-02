@@ -155,7 +155,12 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                 } 
                 else{
 
-                    unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH());
+                    cout << "Counter for decryption: " << endl;
+                    BIO_dump_fp(stdout,(char*)client->counter,12);
+
+                    unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH(),client->counter);
+
+                    incrementCounter(client->counter);
 
                     bool val = inputSanitization((char*)plaintext_buffer);
                     if (!val) {
@@ -384,7 +389,7 @@ Client& TcpServer::getClient(Client &client) {
 /**
  * Recover the public key of clientTwo and create message for clientOne
  */
-unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
+unsigned char* recoverKey(Client &clientOne,Client &clientTwo,unsigned char* peer_counter) {
 
     size_t keylen;
 	unsigned char *key = pem_serialize_pubkey(clientTwo.getClientKeyDH(), &keylen);
@@ -394,12 +399,16 @@ unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
     }
 
     int pos = 0;
-    auto *buffer = new unsigned char[5+keylen];
+    auto *buffer = new unsigned char[4+keylen+AAD_LEN];
 
-    memcpy(buffer+pos,":KEY ",5);
-    pos += 5;
+    memcpy(buffer+pos,":KEY",4);
+    pos += 4;
+
+    memcpy(buffer+pos,peer_counter,AAD_LEN);
+    pos += AAD_LEN;
 
     memcpy(buffer+pos,key,keylen);
+    pos += keylen;
 
     free(key);
 
@@ -636,10 +645,21 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
             }
             else {
 
+                // Generating counter for client-client communication
+                unsigned char* cnt = (unsigned char*)malloc(AAD_LEN);
+
+                RAND_poll();
+                int res = RAND_bytes(cnt,AAD_LEN);
+                if (res != 1) {
+                    cout << "Core dumped here" << endl;
+                    // handleErrors();
+                    return;
+                }    
+                
                 cout<<"Exchanging the keys between the two clients . . ."<<endl;
                 
-                unsigned char *messageOne = recoverKey(requestingClient,client);
-                unsigned char *messageTwo = recoverKey(client,requestingClient);
+                unsigned char *messageOne = recoverKey(requestingClient,client,cnt);
+                unsigned char *messageTwo = recoverKey(client,requestingClient,cnt);
                 storeRequestingInfo(requestingClient,client);
 
                 cout << "First message to send: " <<endl;
@@ -926,8 +946,13 @@ pipe_ret_t TcpServer::receiveClientPubkeyDH(Client & client, unsigned char* nonc
     cout<< decrypted + NONCE_LEN<<endl;
     cout<<"-----------------"<<endl;
 
-    EVP_PKEY* pubkeyDH = pem_deserialize_pubkey(decrypted + NONCE_LEN,numOfBytesReceived-NONCE_LEN);
+    // Retrieve counter for communication
+    client.counter = (unsigned char*)malloc(AAD_LEN);
+    memcpy(client.counter,decrypted + NONCE_LEN,AAD_LEN);
+    
+    EVP_PKEY* pubkeyDH = pem_deserialize_pubkey(decrypted + NONCE_LEN + AAD_LEN,numOfBytesReceived-NONCE_LEN-AAD_LEN);
     client.setClientKeyDH(pubkeyDH);
+
     ret.success = true;
     return ret;
 
@@ -1209,7 +1234,12 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
             client.setChatting();
         }
 
-        auto* buffer = deriveAndEncryptMessage(msg,size,getDHPublicKey(),client.getClientKeyDH());
+        cout << "Counter for encryption: " << endl;
+        BIO_dump_fp(stdout,(char*)client.counter,12);
+
+        auto* buffer = deriveAndEncryptMessage(msg,size,getDHPublicKey(),client.getClientKeyDH(),client.counter);
+
+        incrementCounter(client.counter);
 
         cout << "Server, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));

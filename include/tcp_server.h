@@ -61,6 +61,9 @@ private:
 
 public:
 
+    // Counter for replay attacks
+    unsigned char *counter;
+
     EVP_PKEY* serverRSApubkey;
 
     // Start server routine
@@ -89,39 +92,33 @@ public:
     // Delete a client from list (due to disconnection or logout)
     bool deleteClient(Client & client);
 
-    //
+    // Recover chatting client object from ip and file descriptor
     Client& getClient(Client &client);
 
-    //
+    // Store requestingClient info into receivingClient, for :REQ
     void storeRequestingInfo(Client &receivingClient, Client &requestingClient);
 
-    //
+    // Recover client instance to whom send the request to
     Client& sendRequest(Client &client, std::string message);
 
-    //
+    // Client login
     string loginClient(Client &client, std::string message);
 
-    //
+    // Client registration (only admin)
     string regClient(Client &client, std::string message);
     
-    //
+    // To send list of client formatted as string
     string createList(Client &client, std::string message);
 
-    //
+    // Process request of the client
     void processRequest(Client &client,std::string decryptedMessage);
 
     // Add or remove eventually new observers
     void subscribe(const server_observer_t & observer);
     void unsubscribeAll();
 
-    /** Send a broadcast message or single client message
-     * (need to implement security protocol, and also if sendToAll could
-     * be modified in order to send the request to talk)
-     * finish() will close the server and free clients resources
-     */
-
-    
-
+  
+    // Useful functions
     pipe_ret_t sendToAllClients(const char * msg, size_t size);
     pipe_ret_t sendToClient(Client & client, const char * msg, size_t size);
     pipe_ret_t sendCertificate(Client & client,unsigned char *nonce);

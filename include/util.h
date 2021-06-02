@@ -44,7 +44,6 @@ static char ok_chars[] = "abcdefghijklmnopqrstuvwxyz"
                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                          "1234567890 :";
 
-
 bool inputSanitization(char *msg) {
     if (strspn(msg,ok_chars) < strlen(msg)) {
         return false;
@@ -52,6 +51,15 @@ bool inputSanitization(char *msg) {
     return true;
 }
 
+
+/**
+ * Util function to increment counter, to avoid replay attacks
+ */
+void incrementCounter(unsigned char* counter) {
+    for (int i=0; i<AAD_LEN; i++) {
+        counter[i] += 1;
+    }
+}
 
 /**
  * Utility function to handle OPENSSL errors
@@ -397,7 +405,7 @@ static DH *get_dh2048(void)
  * using AES in gcm mode, via the function gcm_encrypt(). It returns a pointer to the encrypted ciphertext buffer, if some error 
  * occur it returns a nullptr object
  */ 
-unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* myPublicKey, EVP_PKEY* partyPublicKey) {
+unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* myPublicKey, EVP_PKEY* partyPublicKey,unsigned char* counter) {
 
     EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(myPublicKey, NULL);
     EVP_PKEY_derive_init(ctx_drv);
@@ -463,16 +471,6 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
         return nullptr;
     }
 
-    unsigned char aad_gcm[AAD_LEN];
-
-    RAND_poll();
-    res = RAND_bytes(aad_gcm,AAD_LEN);
-    if (res != 1) {
-        cout << "Core dumped here" << endl;
-        // handleErrors();
-        return nullptr;
-    }
-
     unsigned char *cphr_buf;
     unsigned char *tag_buf;
     int cphr_len;
@@ -482,7 +480,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     if (!cphr_buf) return nullptr;
     tag_buf = (unsigned char*)malloc(16);
     if (!tag_buf) return nullptr;
-    cphr_len = gcm_encrypt(msg2,pt_len,aad_gcm,AAD_LEN,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
+    cphr_len = gcm_encrypt(msg2,pt_len,counter,AAD_LEN,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
 
     auto *buffer = new unsigned char[AAD_LEN/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
 
@@ -495,7 +493,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     pos += IV_LEN;
 
     // copy aad
-    memcpy((buffer+pos), aad_gcm, AAD_LEN);
+    memcpy((buffer+pos), counter, AAD_LEN);
     pos += AAD_LEN;
 
     // copy encrypted data
@@ -525,7 +523,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
  * using AES in gcm mode, via the function gcm_decrypt(). It returns a pointer to the decrypted plaintext buffer, if some error 
  * occur it returns a nullptr object
  */ 
-unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY* myPublicKey, EVP_PKEY *partyPublicKey) {
+unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY* myPublicKey, EVP_PKEY *partyPublicKey,unsigned char* counter) {
 
     cout<<"---------DECRYPTING-----------"<<endl;
     cout<<"Deriving the shared secret . . ." << endl;
@@ -609,7 +607,7 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
     cout<<"AES GCM decryption . . ."<<endl;
     cout<<"-----------------"<<endl;
     
-    gcm_decrypt(encryptedData,encrypted_len,AAD,AAD_LEN,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
+    gcm_decrypt(encryptedData,encrypted_len,counter,AAD_LEN,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
 
     free(key);
 

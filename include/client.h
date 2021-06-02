@@ -27,12 +27,6 @@ private:
     // DH key received from client after authentication
     EVP_PKEY *clientPubKeyDH;
 
-    /** Shared symmetric key AES128 bit to use for symmetric communication
-     *  Here client will also contain the shared symmetric key negotiated 
-     *  in the beginning
-     */
-    // EVP_PKEY* serverClientSymmetricKey;
-
     // Monitor online status of client
     bool m_isConnected = false;
 
@@ -59,6 +53,9 @@ private:
 
 public:
 
+    // Counter for replay attacks
+    unsigned char *counter;
+
     ~Client();
     bool operator ==(const Client & other);
 
@@ -80,7 +77,6 @@ public:
 
 
     // Login
-
     void setLogged() { m_isLogged = true; }
     void resetLogged() { m_isLogged = false; }
     bool isLogged() { return m_isLogged; }
@@ -106,10 +102,7 @@ public:
     void resetAdmin() { m_isAdmin = false; }
     bool isAdmin() { return m_isAdmin; }
 
-    // Methods to set and get shared secret between server and client
-    void setServerClientSharedKey();
-    // EVP_PKEY* getServerClientSharedSecret() {return serverClientSymmetricKey;}
-
+    // Setter and getter for client keys and infos
     void setClientName(const std::string & name) { m_name.erase(m_name.begin(),m_name.end()); m_name = name; }
     std::string getClientName() const { return m_name; }
 

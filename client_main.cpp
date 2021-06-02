@@ -17,7 +17,6 @@ TcpClient client;
  *  Function to sanitize client input, no symbols allowed.
  * 
  */
-
 char static ok_charsMain[] =        "abcdefghijklmnopqrstuvwxyz"
                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                          "1234567890 :";

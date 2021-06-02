@@ -73,6 +73,9 @@ public:
     EVP_PKEY *serverRSAKey;
     // Server DH public key
     EVP_PKEY *serverDHKey;    
+
+    unsigned char* counter;
+    unsigned char* peerCounter;
     
     ~TcpClient();
 
@@ -88,12 +91,6 @@ public:
 
     unsigned char* pswHash(string msg,bool reg);
 
-    //
-    // unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* party_key);
-
-    // //
-    // unsigned char* deriveAndDecryptMessage(const char *msg);
-
     // Function must be called at client start in order to authenticate the server, verifying its certificate
     bool authenticateServer();
     bool clientRecognition();
@@ -101,10 +98,10 @@ public:
     // To subscribe client, publish 
     void subscribe(const client_observer_t & observer);
     void unsubscribeAll();
-    // void publish(const char * msg, size_t msgSize);
 
-    void processRequest(unsigned char* plaintext_buffer);
+    void processRequest(unsigned char* plaintext_buffer,int bytesReceived);
 
+    // Getter and setter
     bool getChatting() { return isChatting; }
     void setChatting() { isChatting = true; }
 

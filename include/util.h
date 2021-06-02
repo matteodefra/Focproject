@@ -23,12 +23,12 @@ using namespace std;
 
 #define DECRYPTUSERS " \
 #/bin/bash \n \
-openssl enc -d -aes-256-cbc -in ./AddOn/users.txt.enc -out ./AddOn/users.txt -pass file:./AddOn/ChatBox/ChatBox_App_key.pem \
+openssl enc -d -aes-256-cbc -in ./AddOn/users.txt.enc -out ./AddOn/users.txt -pbkdf2 -pass file:./AddOn/ChatBox/ChatBox_App_key.pem \
 "
 
 #define ENCRYPTUSERS " \
 #/bin/bash \n \
-openssl enc -aes-256-cbc -in ./AddOn/users.txt -out ./AddOn/users.txt.enc -pass file:./AddOn/ChatBox/ChatBox_App_key.pem \
+openssl enc -aes-256-cbc -in ./AddOn/users.txt -out ./AddOn/users.txt.enc -pbkdf2 -pass file:./AddOn/ChatBox/ChatBox_App_key.pem \
 "
 
 #define RMUSERSDECRYPTED " \

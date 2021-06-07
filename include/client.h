@@ -48,14 +48,17 @@ private:
 
     bool m_isAdmin = false;
 
-    // Handler thread for the client thread 
-    std::thread * m_threadHandler = nullptr;
+    
 
 public:
 
+    // Handler thread for the client thread 
+    std::thread * m_threadHandler = nullptr;
     // Counter for replay attacks
     unsigned char *c_counter;
     unsigned char *s_counter;
+
+    bool authenticationPeer = false;
 
     ~Client();
     bool operator ==(const Client & other);

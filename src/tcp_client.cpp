@@ -273,17 +273,40 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
     pipe_ret_t ret;
 
     if (getChatting()) {
-        // Derive the shared secret
-
+        
         auto *buffer = deriveAndEncryptMessage(msg,size,mypubkey_p2p,peerKey,myPeerCounter);
 
+        // Create dummy payload for the server first message
+        auto *forwardMessage = deriveAndEncryptMessage(":FORWARD",strlen(":FORWARD"),mykey_pub,serverDHKey,c_counter);
+
+        BIO_dump_fp(stdout,(char*)c_counter,AAD_LEN);
+
         incrementCounter(myPeerCounter);
+        incrementCounter(c_counter);
 
         cout << "Client, dumping the encrypted payload: " << endl;
-        BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
+        BIO_dump_fp(stdout,(char*)buffer,AAD_LEN + IV_LEN + 16 + strlen(msg));
 
-        // Change name accordingly
-        int numBytesSent = send(m_sockfd, buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
+        cout << "Client, dumping the encrypted payload for server: " << endl;
+        BIO_dump_fp(stdout,(char*)forwardMessage,AAD_LEN + IV_LEN + 16 + strlen(":FORWARD"));
+
+        int total_len = 2*AAD_LEN + 2*IV_LEN + 2*16/*tag len*/ + strlen(msg) + strlen(":FORWARD");
+
+        auto *total_buffer = new unsigned char[total_len];
+
+        int init = 0;
+        memcpy(total_buffer+init,forwardMessage,AAD_LEN+IV_LEN+16+strlen(":FORWARD"));
+        init += AAD_LEN+IV_LEN+16+strlen(":FORWARD");
+
+        memcpy(total_buffer+init,buffer,AAD_LEN+IV_LEN+16+strlen(msg));
+        init += AAD_LEN+IV_LEN+16+strlen(msg);
+
+        cout << "Client, dumping the TOTAL payload for server: " << endl;
+        BIO_dump_fp(stdout,(char*)total_buffer,total_len);
+
+
+        int numBytesSent = send(m_sockfd, total_buffer, total_len, 0);
+
         delete buffer; 
         if (numBytesSent < 0 ) { // send failed
             ret.success = false;
@@ -960,13 +983,15 @@ void TcpClient::processRequest(unsigned char* plaintext_buffer, int receivedByte
         // setAndStorePeerKey(key);
     }
     else {
-        if (strncmp(message,"Request denied",15) == 0) {
+        if (strncmp(message,"Request denied",14) == 0) {
             sendingRequest = false;
         }
-        else if (strncmp(message,"The requesting client is disconnected",38) == 0) {
+        else if (strncmp(message,"The requesting client is disconnected",37) == 0) {
             sendingRequest = false;
         }
-
+        else if (strncmp(message,"Client is already chatting",26) == 0) {
+            sendingRequest = false;
+        }
         publishServerMsg(message,strlen(message));
     }
 }
@@ -977,9 +1002,17 @@ void TcpClient::processRequest(unsigned char* plaintext_buffer, int receivedByte
 pipe_ret_t TcpClient::finish(){
     stop = true;
     terminateReceiveThread();
-    EVP_PKEY_free(mykey_RSA);
-    EVP_PKEY_free(serverDHKey);
-    EVP_PKEY_free(serverRSAKey);
+    if (!mykey_RSA)  EVP_PKEY_free(mykey_RSA);
+    if (!serverDHKey) EVP_PKEY_free(serverDHKey);
+    if (!serverRSAKey) EVP_PKEY_free(serverRSAKey);
+    if (!mykey_pub) EVP_PKEY_free(mykey_pub);
+    if (!peerKey) EVP_PKEY_free(peerKey);
+    if (!peerRSAKey) EVP_PKEY_free(peerRSAKey);
+    if (!mypubkey_p2p) EVP_PKEY_free(mypubkey_p2p);
+    if (!c_counter) free(c_counter);
+    if (!s_counter) free(s_counter);
+    if (!myPeerCounter) free(myPeerCounter);
+    if (!peerCounter) free(peerCounter);
     pipe_ret_t ret;
     if (close(m_sockfd) == -1) { // close failed
         ret.success = false;
@@ -1174,6 +1207,12 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
 
     cout << "Bytes sent: " << numBytesSent << endl;
 
+    delete msg_to_send;
+    delete msg_to_be_signed;
+    delete nonce1;
+    free(pubkeyp2p);
+    free(signature);
+
     if (numBytesSent < 0 ) { // send failed
         ret.success = false;
         ret.msg = strerror(errno);
@@ -1265,7 +1304,7 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
         ret.success = false;
     }
 
-    free(md_ctx2);
+    EVP_MD_CTX_free(md_ctx2);
 
     cout << "Signature verified correctly! Client is authorized." << endl;
     cout<<"-----------------"<<endl;
@@ -1283,6 +1322,10 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
 
     myPeerCounter = counter1;
     peerCounter = counter_extracted;
+
+    delete clear_buf;
+    delete signature2;
+    delete nonce_extracted;
 
     return ret;
 
@@ -1376,7 +1419,7 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
         ret.success = false;
     }
 
-    free(md_ctx2);
+    EVP_MD_CTX_free(md_ctx2);
 
     cout << "Signature verified correctly! Client is authorized." << endl;
     cout<<"-----------------"<<endl;
@@ -1389,6 +1432,10 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
     cout<<"-----------------"<<endl;
 
     peerKey = pem_deserialize_pubkey(clear_buf+NONCE_LEN+AAD_LEN+sizeof(int),dhpubkey_len);
+
+    delete clear_buf;
+    delete signature2;
+    delete nonce_extracted;
 
     // Now I send my signature to the other client!
 
@@ -1537,7 +1584,12 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
     myPeerCounter = counter1;
     peerCounter = counter_extracted;
 
-    delete clear_buf;
+    delete msg_to_send;
+    delete msg_to_be_signed;
+    delete nonce1;
+    free(pubkeyp2p);
+    free(signature);
+
 
     return ret;
 

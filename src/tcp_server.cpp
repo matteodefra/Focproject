@@ -148,7 +148,29 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                 cout<<"Forwarding message to the other client . . ."<<endl;
                 Client &receiver = getClient(*client);
 
-                sendToClient(receiver,msg,numOfBytesReceived);
+                if (client->authenticationPeer == true) {
+                    cout << "Entra qui?" << endl;
+                    sendToClient(receiver,msg,numOfBytesReceived);
+                    client->authenticationPeer = false;
+                }
+                else {
+
+                    cout<<"-----------------"<<endl;
+                    cout<<"Verify :FORWARD payload"<<endl;
+                    int forward_message_len = AAD_LEN + IV_LEN + 16 + strlen(":FORWARD");
+                    BIO_dump_fp(stdout,msg,forward_message_len);
+                    // Server need to decrypt first part of the message, length is known a priori
+                    unsigned char* plaintext_buf = deriveAndDecryptMessage(msg,forward_message_len,getDHPublicKey(),client->getClientKeyDH(),client->c_counter);
+
+                    incrementCounter(client->c_counter);
+
+                    if (strncmp((char*)plaintext_buf,":FORWARD",8) == 0) {
+                        cout<<"-----------------"<<endl;
+                        cout<<"Successfull verification"<<endl; 
+                        sendToClient(receiver,msg+forward_message_len,numOfBytesReceived-forward_message_len);
+                    }
+                }
+
             }
         
             else {
@@ -663,6 +685,8 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
                 unsigned char *messageOne = recoverKey(requestingClient,client,cnt);
                 unsigned char *messageTwo = recoverKey(client,requestingClient,cnt);
                 storeRequestingInfo(requestingClient,client);
+                client.authenticationPeer = true;
+                requestingClient.authenticationPeer = true;
 
                 cout << "First message to send: " <<endl;
                 cout<<messageOne;
@@ -700,8 +724,10 @@ bool TcpServer::deleteClient(Client & client) {
     int clientIndex = -1;
     for (uint i=0; i<m_clients.size(); i++) {
         if (m_clients[i] == client) {
-            EVP_PKEY_free(m_clients[i].getClientKeyRSA());
-            EVP_PKEY_free(m_clients[i].getClientKeyDH());
+            if ( !m_clients[i].getClientKeyRSA() ) EVP_PKEY_free(m_clients[i].getClientKeyRSA());
+            if ( !m_clients[i].getClientKeyDH() ) EVP_PKEY_free(m_clients[i].getClientKeyDH());
+            if ( !m_clients[i].c_counter ) free(m_clients[i].c_counter);
+            if ( !m_clients[i].s_counter ) free(m_clients[i].s_counter);
             clientIndex = i;
             break;
         }
@@ -886,6 +912,7 @@ Client TcpServer::acceptClient(uint timeout) {
     newClient.setIp(inet_ntoa(m_clientAddress.sin_addr));
     m_clients.push_back(newClient);
     m_clients.back().setThreadHandler(std::bind(&TcpServer::receiveTask, this));
+    m_clients.back().m_threadHandler->detach();
 
     return newClient;
 }
@@ -1426,7 +1453,10 @@ pipe_ret_t TcpServer::finish() {
 
     for (uint i=0; i<m_clients.size(); i++) {
         m_clients[i].setDisconnected();
-        EVP_PKEY_free(m_clients[i].getClientKeyDH());
+        if ( !m_clients[i].getClientKeyDH() ) EVP_PKEY_free(m_clients[i].getClientKeyDH());
+        if ( !m_clients[i].getClientKeyRSA() ) EVP_PKEY_free(m_clients[i].getClientKeyRSA());
+        if ( !m_clients[i].c_counter ) free(m_clients[i].c_counter);
+        if ( !m_clients[i].s_counter ) free(m_clients[i].s_counter);
         if (close(m_clients[i].getFileDescriptor()) == -1) { // close failed
             ret.success = false;
             ret.msg = strerror(errno);

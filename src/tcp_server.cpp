@@ -1384,11 +1384,11 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
         }
 
         cout << "Counter for encryption: " << endl;
-        BIO_dump_fp(stdout,(char*)client.c_counter,12);
+        BIO_dump_fp(stdout,(char*)client.s_counter,12);
 
-        auto* buffer = deriveAndEncryptMessage(msg,size,getDHPublicKey(),client.getClientKeyDH(),client.c_counter);
+        auto* buffer = deriveAndEncryptMessage(msg,size,getDHPublicKey(),client.getClientKeyDH(),client.s_counter);
 
-        incrementCounter(client.c_counter);
+        incrementCounter(client.s_counter);
 
         cout << "Server, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));

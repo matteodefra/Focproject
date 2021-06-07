@@ -54,7 +54,8 @@ private:
 public:
 
     // Counter for replay attacks
-    unsigned char *counter;
+    unsigned char *c_counter;
+    unsigned char *s_counter;
 
     ~Client();
     bool operator ==(const Client & other);

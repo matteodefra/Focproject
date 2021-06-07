@@ -61,9 +61,6 @@ private:
 
 public:
 
-    // Counter for replay attacks
-    unsigned char *counter;
-
     EVP_PKEY* serverRSApubkey;
 
     // Start server routine

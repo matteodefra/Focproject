@@ -74,7 +74,8 @@ public:
     // Server DH public key
     EVP_PKEY *serverDHKey;    
 
-    unsigned char* counter;
+    unsigned char* c_counter;
+    unsigned char* s_counter;
     unsigned char* peerCounter;
     
     ~TcpClient();

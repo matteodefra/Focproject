@@ -275,9 +275,9 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
     if (getChatting()) {
         // Derive the shared secret
 
-        auto *buffer = deriveAndEncryptMessage(msg,size,mykey_pub,peerKey,peerCounter);
+        auto *buffer = deriveAndEncryptMessage(msg,size,mypubkey_p2p,peerKey,myPeerCounter);
 
-        incrementCounter(peerCounter);
+        incrementCounter(myPeerCounter);
 
         cout << "Client, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
@@ -336,6 +336,10 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
             }
             ret.success = true;
             return ret;
+        }
+
+        if (strncmp(msg,":REQ",4) == 0) {
+            sendingRequest = true;
         }
 
         cout << "Counter for encryption: " << endl;
@@ -886,7 +890,7 @@ void TcpClient::ReceiveTask() {
 
             if (getChatting()) {
 
-                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,peerKey,peerCounter);
+                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mypubkey_p2p,peerKey,peerCounter);
 
                 incrementCounter(peerCounter);
 
@@ -902,9 +906,9 @@ void TcpClient::ReceiveTask() {
                 BIO_dump_fp(stdout,(char*)c_counter,12);
 
                 
-                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,serverDHKey,c_counter);
+                unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,serverDHKey,s_counter);
 
-                incrementCounter(c_counter);
+                incrementCounter(s_counter);
 
                 // Based on message received, we need to perform some action
                 processRequest(plaintext_buffer,numOfBytesReceived);
@@ -938,12 +942,31 @@ void TcpClient::processRequest(unsigned char* plaintext_buffer, int receivedByte
         // Move pointer to key
         unsigned char *key = plaintext_buffer + 4 + AAD_LEN;
 
-        cout << "Key peer: " << key << endl;
+        peerRSAKey = pem_deserialize_pubkey(key,strlen((char*)key));
+
+        if (sendingRequest) {
+            // If true, this is the first delivering client
+            // Must deliver <nonce1+counter1+new pubkeyDH1>signature(all)
+            pipe_ret_t ret = sendAndReceiveSignature();
+            sendingRequest = false;
+        }
+        else {
+            // Else, I must wait for a specific message
+            // Must receive and deliver then <nonce1+counter2+new pubkeyDH2>signature(all)
+            pipe_ret_t ret = receiveAndSendSignature();
+        }
 
         // When a key message arrives, save the key into tcpclient object
-        setAndStorePeerKey(key);
+        // setAndStorePeerKey(key);
     }
     else {
+        if (strncmp(message,"Request denied",15) == 0) {
+            sendingRequest = false;
+        }
+        else if (strncmp(message,"The requesting client is disconnected",38) == 0) {
+            sendingRequest = false;
+        }
+
         publishServerMsg(message,strlen(message));
     }
 }
@@ -980,4 +1003,542 @@ void TcpClient::terminateReceiveThread() {
 
 TcpClient::~TcpClient() {
     terminateReceiveThread();
+}
+
+/**
+ * A useful function which uses the static struct of generated p and g DH parameters to create a Diffie Hellman
+ * key pair for the P2P communication
+ */
+int TcpClient::generateDHKeypairsForP2P() {
+
+    EVP_PKEY* dh_params;
+    DH* tmp = get_dh2048();
+    dh_params = EVP_PKEY_new();
+    // Loading the dh parameters into dhparams structure
+    int res = EVP_PKEY_set1_DH(dh_params,tmp);
+    DH_free(tmp);
+
+
+    if (res == 0) {
+        finish();
+        handleErrors();
+        return 0;
+    }
+
+    // Generation of the public key
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(dh_params, NULL);
+    EVP_PKEY* my_pubkey = NULL;
+    EVP_PKEY_keygen_init(ctx);
+    if (EVP_PKEY_keygen(ctx, &my_pubkey)!=1) {
+        cout << "There was a problem in (p,g) DH parameters generation\nAborting...";
+        return 0;
+    }
+
+    EVP_PKEY_CTX_free(ctx);
+    EVP_PKEY_free(dh_params);
+
+    mypubkey_p2p = my_pubkey;    
+    return 1;
+
+}
+
+
+/**
+ * Asking client: will send the signature and wait for the other client signature
+ */ 
+pipe_ret_t TcpClient::sendAndReceiveSignature() {
+
+    cout << "Starting message + signature creation" << endl;
+
+    pipe_ret_t ret;
+
+    generateDHKeypairsForP2P();
+
+    size_t key_len;
+    unsigned char* pubkeyp2p = pem_serialize_pubkey(mypubkey_p2p,&key_len);
+    unsigned int pubkey_len = strlen((char*)pubkeyp2p);
+
+    cout << "DH client pubkey: " << pubkeyp2p << endl;
+    cout << "Pubkey len: " << pubkey_len << endl;
+
+    // Creting counter for replay attacks 
+    RAND_poll();
+
+    unsigned char* counter1 =  new unsigned char[AAD_LEN];
+    if (!counter1) {
+        ret.success = false;
+        return ret;
+    }
+
+    cout<<"Creating a counter . . ."<<endl;
+    int result = RAND_bytes(counter1,AAD_LEN);
+    if (result != 1) {
+        cout << "Error creating nonce(sendCertificate)"<<endl;
+        ret.success = false;
+    }
+    cout<<"Counter created: "<<endl;
+    BIO_dump_fp(stdout,(char*)counter1,AAD_LEN);
+
+    // Creating random nonce
+    RAND_poll();
+
+    unsigned char* nonce1 =  new unsigned char[NONCE_LEN];
+    if (!nonce1) {
+        ret.success = false;
+        return ret;
+    }
+
+    cout<<"Creating a nonce . . ."<<endl;
+    result = RAND_bytes(nonce1,NONCE_LEN);
+    if (result != 1) {
+        cout << "Error creating nonce(sendCertificate)"<<endl;
+        ret.success = false;
+    }
+    cout<<"Nonce created: "<<endl;
+    BIO_dump_fp(stdout,(char*)nonce1,NONCE_LEN);
+
+
+    int msg_to_sign_len = NONCE_LEN + AAD_LEN + sizeof(int) + pubkey_len;
+
+    auto* msg_to_be_signed = new unsigned char[msg_to_sign_len];
+    
+
+    int start = 0;
+    memcpy(msg_to_be_signed + start,nonce1,NONCE_LEN); //nonce
+    start += NONCE_LEN;
+
+    memcpy(msg_to_be_signed + start,counter1,AAD_LEN); //c_nonce
+    start += AAD_LEN;
+
+    memcpy(msg_to_be_signed + start,(char*)&pubkey_len,sizeof(int)); //dh pubkey length
+    start += sizeof(int);
+
+    memcpy(msg_to_be_signed + start,pubkeyp2p,pubkey_len); //dh pubkey
+    start += pubkey_len;
+
+
+    cout<<"Message to be signed created"<<endl;
+    
+    unsigned char* signature;
+    unsigned int signature_len;
+
+    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
+
+    signature =  (unsigned char*)malloc(EVP_PKEY_size(mykey_RSA));
+    if (!signature) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    int res = EVP_SignInit(md_ctx,EVP_sha256());
+    if (res == 0) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_SignUpdate(md_ctx,msg_to_be_signed,msg_to_sign_len);
+    if (res == 0) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_SignFinal(md_ctx,signature,&signature_len,mykey_RSA);
+    if (res == 0) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false; 
+    }
+
+    EVP_MD_CTX_free(md_ctx);
+
+    cout<< "Concatenating the clear msg to signature"<<endl;
+
+    auto* msg_to_send = new unsigned char[msg_to_sign_len + signature_len];
+
+    int start_num = 0;
+
+    memcpy(msg_to_send + start_num,msg_to_be_signed,msg_to_sign_len); //clear msg
+    start_num += msg_to_sign_len;
+
+    memcpy(msg_to_send + start_num,signature,signature_len); //signature
+    start_num += signature_len;
+
+
+    cout << "Sending the client message signed . . ."<< endl;
+
+    // Message ready to be sent!!
+    int numBytesSent = send(m_sockfd, msg_to_send, msg_to_sign_len + signature_len, 0);
+
+    cout << "Bytes sent: " << numBytesSent << endl;
+
+    if (numBytesSent < 0 ) { // send failed
+        ret.success = false;
+        ret.msg = strerror(errno);
+        return ret;
+    }
+    if ((uint)numBytesSent < msg_to_sign_len + signature_len) { // not all bytes were sent
+        ret.success = false;
+        string msg = "Not all the bytes were sent to client";
+        ret.msg = msg;
+        return ret;
+    }
+
+    // Now I receive the signature from the other client!
+    char msg_rec[MAX_PACKET_SIZE];
+    int numOfBytesReceived = recv(m_sockfd, msg_rec, MAX_PACKET_SIZE, 0);
+
+    if(numOfBytesReceived < 1) {
+        cout<<"Error receiving the username verification"<<endl;
+        ret.success = false;
+        return ret;
+    }    
+
+    cout << "Number of bytes received is: " << numOfBytesReceived << endl;
+    cout << "Dumping the total message received" << endl;
+    BIO_dump_fp(stdout,msg_rec,numOfBytesReceived);
+
+    //VERIFY SIGNATURE
+
+    unsigned char* nonce_extracted = new unsigned char[NONCE_LEN]; //nonce
+    unsigned char* counter_extracted = new unsigned char[AAD_LEN]; //counter
+
+    //retrieve nonce
+    int pos_n = 0;
+
+    memcpy(nonce_extracted,msg_rec + pos_n,NONCE_LEN);
+    pos_n += NONCE_LEN;
+
+    //retrieve counter 
+
+    memcpy(counter_extracted,msg_rec + pos_n,AAD_LEN);
+    pos_n += AAD_LEN;
+
+    //retrieve pubkey len
+
+    unsigned int dhpubkey_len;
+
+    memcpy((char*)&dhpubkey_len,msg_rec + pos_n,sizeof(int));
+    pos_n += sizeof(int);
+
+    int clear_buf_len = NONCE_LEN + AAD_LEN + sizeof(int) + dhpubkey_len; 
+    auto *clear_buf = new unsigned char[clear_buf_len];
+
+    int signature_len2 = numOfBytesReceived-clear_buf_len;
+    auto *signature2 = new unsigned char[signature_len2];
+
+    cout<<"-----------------"<<endl;
+
+    memcpy(clear_buf,msg_rec,clear_buf_len);
+
+    memcpy(signature2,msg_rec+clear_buf_len,signature_len2);
+
+    
+    // Verify the signature in the file
+    EVP_MD_CTX *md_ctx2 = EVP_MD_CTX_new();
+    if (!md_ctx2) {
+        cout << "Error creating the context during the signature verification" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_VerifyInit(md_ctx2,EVP_sha256());
+    if (res == 0) {
+        cout << "Error in the VerifyInit during the signature verification" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_VerifyUpdate(md_ctx2,clear_buf,clear_buf_len);
+    if (res == 0) {
+        cout << "Error in the VerifyUpdate during the signature verification" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_VerifyFinal(md_ctx2,(unsigned char*)signature2,signature_len2,peerRSAKey);
+    if (res == 0) {
+        cout << "Error in the VerifyFinal during the signature verification" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    free(md_ctx2);
+
+    cout << "Signature verified correctly! Client is authorized." << endl;
+    cout<<"-----------------"<<endl;
+
+    cout.flush();
+
+    cout<<"-----------------"<<endl;
+    cout<<"Peer DH public key:"<<endl;
+    cout<<clear_buf+NONCE_LEN + AAD_LEN + sizeof(int) <<endl;
+    cout<<"-----------------"<<endl;
+
+    peerKey = pem_deserialize_pubkey(clear_buf+NONCE_LEN+AAD_LEN+sizeof(int),dhpubkey_len);
+
+    ret.success = true;
+
+    myPeerCounter = counter1;
+    peerCounter = counter_extracted;
+
+    return ret;
+
+}
+
+
+/**
+ * Answering client: will receive the signature and answer with its parameters
+ */
+pipe_ret_t TcpClient::receiveAndSendSignature() {
+
+    cout << "Receiving client" << endl;
+
+    pipe_ret_t ret;
+
+    char msg_rec[MAX_PACKET_SIZE];
+    int numOfBytesReceived = recv(m_sockfd, msg_rec, MAX_PACKET_SIZE, 0);
+
+    if(numOfBytesReceived < 1) {
+        cout<<"Error receiving the username verification"<<endl;
+        ret.success = false;
+        return ret;
+    }    
+
+    cout << "Number of bytes received is: " << numOfBytesReceived << endl;
+    cout << "Dumping the total message received" << endl;
+    BIO_dump_fp(stdout,msg_rec,numOfBytesReceived);
+
+    //VERIFY SIGNATURE
+
+    unsigned char* nonce_extracted = new unsigned char[NONCE_LEN]; //nonce
+    unsigned char* counter_extracted = new unsigned char[AAD_LEN]; //counter
+
+    //retrieve nonce
+    int pos_n = 0;
+
+    memcpy(nonce_extracted,msg_rec + pos_n,NONCE_LEN);
+    pos_n += NONCE_LEN;
+
+    //retrieve counter 
+
+    memcpy(counter_extracted,msg_rec + pos_n,AAD_LEN);
+    pos_n += AAD_LEN;
+
+    //retrieve pubkey len
+
+    unsigned int dhpubkey_len;
+
+    memcpy((char*)&dhpubkey_len,msg_rec + pos_n,sizeof(int));
+    pos_n += sizeof(int);
+
+    int clear_buf_len = NONCE_LEN + AAD_LEN + sizeof(int) + dhpubkey_len; 
+    auto *clear_buf = new unsigned char[clear_buf_len];
+
+    int signature_len2 = numOfBytesReceived-clear_buf_len;
+    auto *signature2 = new unsigned char[signature_len2];
+
+    cout<<"-----------------"<<endl;
+
+    memcpy(clear_buf,msg_rec,clear_buf_len);
+
+    memcpy(signature2,msg_rec+clear_buf_len,signature_len2);
+
+    
+    // Verify the signature in the file
+    EVP_MD_CTX *md_ctx2 = EVP_MD_CTX_new();
+    if (!md_ctx2) {
+        cout << "Error creating the context during the signature verification" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    int res = EVP_VerifyInit(md_ctx2,EVP_sha256());
+    if (res == 0) {
+        cout << "Error in the VerifyInit during the signature verification" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_VerifyUpdate(md_ctx2,clear_buf,clear_buf_len);
+    if (res == 0) {
+        cout << "Error in the VerifyUpdate during the signature verification" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_VerifyFinal(md_ctx2,(unsigned char*)signature2,signature_len2,peerRSAKey);
+    if (res == 0) {
+        cout << "Error in the VerifyFinal during the signature verification" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    free(md_ctx2);
+
+    cout << "Signature verified correctly! Client is authorized." << endl;
+    cout<<"-----------------"<<endl;
+
+    cout.flush();
+
+    cout<<"-----------------"<<endl;
+    cout<<"Peer DH public key:"<<endl;
+    cout<<clear_buf+NONCE_LEN + AAD_LEN + sizeof(int) <<endl;
+    cout<<"-----------------"<<endl;
+
+    peerKey = pem_deserialize_pubkey(clear_buf+NONCE_LEN+AAD_LEN+sizeof(int),dhpubkey_len);
+
+    // Now I send my signature to the other client!
+
+    cout << "Starting message + signature creation" << endl;
+
+    generateDHKeypairsForP2P();
+
+    size_t key_len;
+    unsigned char* pubkeyp2p = pem_serialize_pubkey(mypubkey_p2p,&key_len);
+    unsigned int pubkey_len_to_send = strlen((char*)pubkeyp2p);
+
+    cout << "DH client pubkey: " << pubkeyp2p << endl;
+    cout << "Pubkey len: " << pubkey_len_to_send << endl;
+
+
+    // Creting counter for replay attacks 
+    RAND_poll();
+
+    unsigned char* counter1 =  new unsigned char[AAD_LEN];
+    if (!counter1) {
+        ret.success = false;
+        return ret;
+    }
+
+    cout<<"Creating a counter . . ."<<endl;
+    int result = RAND_bytes(counter1,AAD_LEN);
+    if (result != 1) {
+        cout << "Error creating nonce(sendCertificate)"<<endl;
+        ret.success = false;
+    }
+    cout<<"Counter created: "<<endl;
+    BIO_dump_fp(stdout,(char*)counter1,AAD_LEN);
+
+    // Creating random nonce
+    RAND_poll();
+
+    unsigned char* nonce1 =  new unsigned char[NONCE_LEN];
+    if (!nonce1) {
+        ret.success = false;
+        return ret;
+    }
+
+    cout<<"Creating a nonce . . ."<<endl;
+    result = RAND_bytes(nonce1,NONCE_LEN);
+    if (result != 1) {
+        cout << "Error creating nonce(sendCertificate)"<<endl;
+        ret.success = false;
+    }
+    cout<<"Nonce created: "<<endl;
+    BIO_dump_fp(stdout,(char*)nonce1,NONCE_LEN);
+
+
+    int msg_to_sign_len = NONCE_LEN + AAD_LEN + sizeof(int) + pubkey_len_to_send;
+
+    auto* msg_to_be_signed = new unsigned char[msg_to_sign_len];
+    
+
+    int start = 0;
+    memcpy(msg_to_be_signed + start,nonce1,NONCE_LEN); //nonce
+    start += NONCE_LEN;
+
+    memcpy(msg_to_be_signed + start,counter1,AAD_LEN); //c_nonce
+    start += AAD_LEN;
+
+    memcpy(msg_to_be_signed + start,(char*)&pubkey_len_to_send,sizeof(int)); //dh pubkey length
+    start += sizeof(int);
+
+    memcpy(msg_to_be_signed + start,pubkeyp2p,pubkey_len_to_send); //dh pubkey
+    start += pubkey_len_to_send;
+
+
+    cout<<"Message to be signed created"<<endl;
+    
+    unsigned char* signature;
+    unsigned int signature_len;
+
+    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
+
+    signature =  (unsigned char*)malloc(EVP_PKEY_size(mykey_RSA));
+    if (!signature) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_SignInit(md_ctx,EVP_sha256());
+    if (res == 0) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_SignUpdate(md_ctx,msg_to_be_signed,msg_to_sign_len);
+    if (res == 0) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false;
+    }
+
+    res = EVP_SignFinal(md_ctx,signature,&signature_len,mykey_RSA);
+    if (res == 0) {
+        cout << "ERROR!" << endl;
+        ERR_print_errors_fp(stderr);
+        ret.success = false; 
+    }
+
+    EVP_MD_CTX_free(md_ctx);
+
+    cout<< "Concatenating the clear msg to signature"<<endl;
+
+    auto* msg_to_send = new unsigned char[msg_to_sign_len + signature_len];
+
+    int start_num = 0;
+
+    memcpy(msg_to_send + start_num,msg_to_be_signed,msg_to_sign_len); //clear msg
+    start_num += msg_to_sign_len;
+
+    memcpy(msg_to_send + start_num,signature,signature_len); //signature
+    start_num += signature_len;
+
+
+    cout << "Sending the client message signed . . ."<< endl;
+
+    // Message ready to be sent!!
+    int numBytesSent = send(m_sockfd, msg_to_send, msg_to_sign_len + signature_len, 0);
+
+    cout << "Bytes sent: " << numBytesSent << endl;
+
+    if (numBytesSent < 0 ) { // send failed
+        ret.success = false;
+        ret.msg = strerror(errno);
+        return ret;
+    }
+    if ((uint)numBytesSent < msg_to_sign_len + signature_len) { // not all bytes were sent
+        ret.success = false;
+        string msg = "Not all the bytes were sent to client";
+        ret.msg = msg;
+        return ret;
+    }
+
+
+    cout << "Signature sent!!!" << endl;
+
+    ret.success = true;
+
+    myPeerCounter = counter1;
+    peerCounter = counter_extracted;
+
+    delete clear_buf;
+
+    return ret;
+
 }

@@ -63,6 +63,7 @@ private:
 
 public:
 
+    bool sendingRequest = false;
     // My RSA private key
     EVP_PKEY *mykey_RSA;
     // My DH publick key
@@ -73,9 +74,16 @@ public:
     EVP_PKEY *serverRSAKey;
     // Server DH public key
     EVP_PKEY *serverDHKey;    
+    // Peer RSA pubkey (to verify signature)
+    EVP_PKEY *peerRSAKey;
+    // DH pubkey for peer to peer communication
+    EVP_PKEY *mypubkey_p2p;
+
 
     unsigned char* c_counter;
     unsigned char* s_counter;
+
+    unsigned char* myPeerCounter;
     unsigned char* peerCounter;
     
     ~TcpClient();
@@ -120,6 +128,10 @@ public:
     void saveMyKey();
 
     int generateDHKeypairs();
+    int generateDHKeypairsForP2P();
+
+    pipe_ret_t sendAndReceiveSignature();
+    pipe_ret_t receiveAndSendSignature();
 
     pipe_ret_t finish();
 };

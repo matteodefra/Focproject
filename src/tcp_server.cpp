@@ -413,7 +413,7 @@ Client& TcpServer::getClient(Client &client) {
 /**
  * Recover the public key of clientTwo and create message for clientOne
  */
-unsigned char* recoverKey(Client &clientOne,Client &clientTwo,unsigned char* peer_counter) {
+unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
 
     size_t keylen;
 	unsigned char *key = pem_serialize_pubkey(clientTwo.getClientKeyDH(), &keylen);
@@ -423,13 +423,10 @@ unsigned char* recoverKey(Client &clientOne,Client &clientTwo,unsigned char* pee
     }
 
     int pos = 0;
-    auto *buffer = new unsigned char[4+keylen+AAD_LEN];
+    auto *buffer = new unsigned char[4+keylen];
 
     memcpy(buffer+pos,":KEY",4);
     pos += 4;
-
-    memcpy(buffer+pos,peer_counter,AAD_LEN);
-    pos += AAD_LEN;
 
     memcpy(buffer+pos,key,keylen);
     pos += keylen;
@@ -669,21 +666,10 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
             }
             else {
 
-                // Generating counter for client-client communication
-                unsigned char* cnt = (unsigned char*)malloc(AAD_LEN);
-
-                RAND_poll();
-                int res = RAND_bytes(cnt,AAD_LEN);
-                if (res != 1) {
-                    cout << "Core dumped here" << endl;
-                    // handleErrors();
-                    return;
-                }    
-                
                 cout<<"Exchanging the keys between the two clients . . ."<<endl;
                 
-                unsigned char *messageOne = recoverKey(requestingClient,client,cnt);
-                unsigned char *messageTwo = recoverKey(client,requestingClient,cnt);
+                unsigned char *messageOne = recoverKey(requestingClient,client);
+                unsigned char *messageTwo = recoverKey(client,requestingClient);
                 storeRequestingInfo(requestingClient,client);
                 client.authenticationPeer = true;
                 requestingClient.authenticationPeer = true;

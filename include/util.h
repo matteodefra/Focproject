@@ -19,7 +19,7 @@ using namespace std;
 
 #define IV_LEN EVP_CIPHER_iv_length(EVP_aes_128_gcm())
 #define NONCE_LEN 16
-#define AAD_LEN 12
+#define AAD_LEN 4
 
 #define DECRYPTUSERS " \
 #/bin/bash \n \
@@ -225,15 +225,15 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
     }
 
 
-    while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
-        //cout << "Entra nel loop?" << endl;
-        if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
-            std::cout<<"Error in performing encryption"<<std::endl;
-            handleErrors();
-        }
-        ciphertext_len += len;
-        plaintext_len -= len;
-    }
+    // while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
+    //     //cout << "Entra nel loop?" << endl;
+    //     if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
+    //         std::cout<<"Error in performing encryption"<<std::endl;
+    //         handleErrors();
+    //     }
+    //     ciphertext_len += len;
+    //     plaintext_len -= len;
+    // }
 
     if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, plaintext_len)){
         std::cout<<"Error in performing encryption"<<std::endl;
@@ -304,15 +304,15 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
     }
 
 
-    while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
-        //cout << "Entra nel loop?" << endl;
-        if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
-            std::cout<<"Error in performing encryption"<<std::endl;
-            handleErrors();
-        }
-        plaintext_len += len;
-        ciphertext_len -= len;
-    }
+    // while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
+    //     //cout << "Entra nel loop?" << endl;
+    //     if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
+    //         std::cout<<"Error in performing encryption"<<std::endl;
+    //         handleErrors();
+    //     }
+    //     plaintext_len += len;
+    //     ciphertext_len -= len;
+    // }
 
     if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, ciphertext_len)){
         std::cout<<"Error in performing encryption"<<std::endl;
@@ -328,7 +328,7 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
 
     //Finalize Encryption
     if(1 != EVP_DecryptFinal(ctx, plaintext + plaintext_len, &len)){
-        std::cout<<"Error in finalizing encryption"<<std::endl;
+        std::cout<<"Error in finalizing decryption"<<std::endl;
         handleErrors();
     }
     plaintext_len += len;
@@ -405,7 +405,7 @@ static DH *get_dh2048(void)
  * using AES in gcm mode, via the function gcm_encrypt(). It returns a pointer to the encrypted ciphertext buffer, if some error 
  * occur it returns a nullptr object
  */ 
-unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* myPublicKey, EVP_PKEY* partyPublicKey,unsigned char* counter) {
+unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* myPublicKey, EVP_PKEY* partyPublicKey,unsigned int counter) {
 
     EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(myPublicKey, NULL);
     EVP_PKEY_derive_init(ctx_drv);
@@ -471,6 +471,9 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
         return nullptr;
     }
 
+    unsigned char *aad = new unsigned char[AAD_LEN];
+    memcpy(aad,(char*)&counter,AAD_LEN);
+
     unsigned char *cphr_buf;
     unsigned char *tag_buf;
     int cphr_len;
@@ -480,7 +483,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     if (!cphr_buf) return nullptr;
     tag_buf = (unsigned char*)malloc(16);
     if (!tag_buf) return nullptr;
-    cphr_len = gcm_encrypt(msg2,pt_len,counter,AAD_LEN,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
+    cphr_len = gcm_encrypt(msg2,pt_len,aad,AAD_LEN,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
 
     auto *buffer = new unsigned char[AAD_LEN/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
 
@@ -493,7 +496,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     pos += IV_LEN;
 
     // copy aad
-    memcpy((buffer+pos), counter, AAD_LEN);
+    memcpy((buffer+pos), (char*)&counter, AAD_LEN);
     pos += AAD_LEN;
 
     // copy encrypted data
@@ -523,7 +526,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
  * using AES in gcm mode, via the function gcm_decrypt(). It returns a pointer to the decrypted plaintext buffer, if some error 
  * occur it returns a nullptr object
  */ 
-unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY* myPublicKey, EVP_PKEY *partyPublicKey,unsigned char* counter) {
+unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY* myPublicKey, EVP_PKEY *partyPublicKey,unsigned int counter) {
 
     cout<<"---------DECRYPTING-----------"<<endl;
     cout<<"Deriving the shared secret . . ." << endl;
@@ -585,9 +588,12 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
     pos += IV_LEN;
 
     // retrieve AAD
-    unsigned char AAD[12];
-    memcpy(AAD, msg+pos,AAD_LEN);
+    unsigned int AAD;
+    memcpy((char*)&AAD, msg+pos,AAD_LEN);
     pos += AAD_LEN;
+
+    unsigned char* aad = new unsigned char[AAD_LEN];
+    memcpy(aad,(char*)&counter,AAD_LEN);
 
     // retrieve encrypted data
     size_t encrypted_len = numOfBytesReceived - 16 - IV_LEN - AAD_LEN;
@@ -607,7 +613,7 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
     cout<<"AES GCM decryption . . ."<<endl;
     cout<<"-----------------"<<endl;
     
-    gcm_decrypt(encryptedData,encrypted_len,counter,AAD_LEN,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
+    gcm_decrypt(encryptedData,encrypted_len,aad,AAD_LEN,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
 
     free(key);
 
@@ -617,152 +623,402 @@ unsigned char* deriveAndDecryptMessage(char *msg,int numOfBytesReceived,EVP_PKEY
 
 }
 
-// ASYMMETRIC ENCRYPTION (Used for DH Public key exchange in the authentication phase)
 
-unsigned char* asymmetric_enc(unsigned char* msg_to_enc, int numBytes, EVP_PKEY* publickey, size_t *length){
-    
-    cout << "------ASYMMETRIC ENCRYPTION------"<<endl;
-    
-    unsigned char* encrypted_key = (unsigned char*)malloc(EVP_PKEY_size(publickey));
-    if (!encrypted_key) return NULL;
-    int encrypted_key_len;
+unsigned char* deriveAndEncryptPeerMessage(unsigned char *buffer, const char * msg, EVP_PKEY* myPublicKey, EVP_PKEY* partyPublicKey,unsigned int counter, unsigned int size_buffer) {
 
-    unsigned char* ciphertext = (unsigned char*)malloc(numBytes + 16);
-    if (!ciphertext) return NULL;
-    int outlen, cipherlen;
+    EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(myPublicKey, NULL);
+    EVP_PKEY_derive_init(ctx_drv);
+    if (1 != EVP_PKEY_derive_set_peer(ctx_drv, partyPublicKey)) {
+        handleErrors();
+    }
+    unsigned char* secret;
 
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    unsigned char* iv = (unsigned char*)malloc(EVP_CIPHER_iv_length(EVP_aes_128_cbc()));
-    if (!iv) return NULL;
-    int iv_len = EVP_CIPHER_iv_length(EVP_aes_128_cbc());
-    int ret = EVP_SealInit(ctx,EVP_aes_128_cbc(),&encrypted_key, &encrypted_key_len, iv, &publickey,1);
+    /* Retrieving shared secret’s length */
+    cout<<"---------ENCRYPTING-----------"<<endl;
+    cout<<"Deriving the shared secret . . ."<<endl;
+    size_t secretlen;
+    if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
+        handleErrors();
+    }
+    /* Deriving shared secret */
+    secret = (unsigned char*)malloc(secretlen);
+    if (secret == NULL) {
+        handleErrors();
+    }
+    if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
+        handleErrors();
+    }
+    EVP_PKEY_CTX_free(ctx_drv);
 
+    // We need to derive the hash of the shared secret now
+    cout<<"Hashing the shared secret . . ."<<endl;
+    unsigned char* digest;
+    unsigned int digestlen;
+    EVP_MD_CTX* digest_ctx;
+    /* Buffer allocation for the digest */
+    digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
+    if (!digest) return NULL;
+    /* Context allocation */
+    digest_ctx = EVP_MD_CTX_new();
 
-    if(ret == 0 ){
-        cout<<"Error with SealInit during encryption"<<endl;
-        return NULL;
+    /* Hashing (initialization + single update + finalization */
+    EVP_DigestInit(digest_ctx, EVP_sha256());
+    EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
+    EVP_DigestFinal(digest_ctx, digest, &digestlen);
+    /* Context deallocation */
+    EVP_MD_CTX_free(digest_ctx);
+
+    // Taking first 128 bits of the digest
+    // Get first 16 bytes of shared secret, to use as key in AES
+    unsigned char *key = new unsigned char[16];//(unsigned char*)malloc(16);
+    memcpy(key,digest,16);
+
+    free(secret);
+    free(digest);
+
+    // Also this section could be moved in an utility function
+    unsigned char msg2[strlen(msg)];
+    strcpy((char*)msg2,msg);
+
+    unsigned char iv_gcm[IV_LEN];
+
+    RAND_poll();
+    int res = RAND_bytes(iv_gcm,IV_LEN);
+    if (res != 1) {
+        cout << "Core dumped here" << endl;
+        // handleErrors();
+        return nullptr;
     }
 
-    ret = EVP_SealUpdate(ctx,&ciphertext[0],&outlen,msg_to_enc,numBytes);
-    if(ret == 0 ){
-        ERR_print_errors_fp(stderr);
-        cout<<"Error with SealUpdate during encryption"<<endl;
-        return NULL;
-    }
+    unsigned char *aad = new unsigned char[AAD_LEN+AAD_LEN+size_buffer];
+    int start = 0;
 
-    cipherlen = outlen;
-    ret = EVP_SealFinal(ctx,ciphertext+cipherlen, &outlen);
-    if(ret == 0 ){
-        cout<<"Error with SealFinal during encryption"<<endl;
-        return NULL;
-    }
+    memcpy(aad+start,(char*)&size_buffer,AAD_LEN);
+    start += AAD_LEN;
 
-    cipherlen += outlen;
-    EVP_CIPHER_CTX_free(ctx);
+    memcpy(aad+start,(char*)&counter,AAD_LEN);
+    start += AAD_LEN;
 
-    auto* buffer = new unsigned char[iv_len + encrypted_key_len + cipherlen];
+    memcpy(aad+start,buffer,size_buffer);
+    start += size_buffer;
 
-    //copy iv
+    cout << "AAD: " <<endl;
+    BIO_dump_fp(stdout,(char*)aad,AAD_LEN+AAD_LEN+size_buffer);
+
+    unsigned char *cphr_buf;
+    unsigned char *tag_buf;
+    int cphr_len;
+    int pt_len = strlen(msg);
+
+    cphr_buf = (unsigned char*)malloc(strlen(msg));
+    if (!cphr_buf) return nullptr;
+    tag_buf = (unsigned char*)malloc(16);
+    if (!tag_buf) return nullptr;
+    cphr_len = gcm_encrypt(msg2,pt_len,aad,AAD_LEN+AAD_LEN+size_buffer,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
+
+    auto *buff = new unsigned char[AAD_LEN+AAD_LEN+size_buffer/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
+
+    free(key);
 
     int pos = 0;
-    memcpy(buffer+pos,iv,iv_len);
-    pos += iv_len;
 
-    //copy key
+    // copy iv
+    memcpy(buff+pos, iv_gcm, IV_LEN);
+    pos += IV_LEN;
 
-    memcpy(buffer+pos,encrypted_key,encrypted_key_len);
-    pos += encrypted_key_len;
+    // copy aad
+    memcpy((buff+pos), aad, AAD_LEN+AAD_LEN+size_buffer);
+    pos += AAD_LEN;
+    pos += AAD_LEN;
+    pos += size_buffer; 
 
-    //copy ciphertext
+    // copy encrypted data
+    memcpy((buff+pos), cphr_buf, cphr_len);
+    pos += pt_len;
+    free(cphr_buf);
 
-    memcpy(buffer+pos,ciphertext,cipherlen);
+    // copy tag
+    memcpy((buff+pos), tag_buf, 16);
+    pos += 16;
+    free(tag_buf);
 
-    cout << "Len of the encrypted buffer: " << iv_len+encrypted_key_len+cipherlen << endl;
+    return buff;
 
-    // Storing length of the message
-    *length = iv_len + encrypted_key_len + cipherlen;
-
-    // Cleaning
-    free(iv);
-    free(encrypted_key);
-    free(ciphertext);
-
-    cout<<"Encrypted message successfully"<<endl;
-
-    return buffer;
 }
 
 
+unsigned char* deriveAndDecryptPeerMessage(char *msg,int numOfBytesReceived,EVP_PKEY* myPublicKey, EVP_PKEY *partyPublicKey,unsigned int counter) {
 
-unsigned char* asymmetric_dec(unsigned char* msg, int msg_len, EVP_PKEY* privatekey,EVP_PKEY* publickey){
+    cout<<"---------DECRYPTING-----------"<<endl;
+    cout<<"Deriving the shared secret . . ." << endl;
 
-    // int msg_len = strlen((char*)msg);
-    cout << "------ASYMMETRIC DECRYPTION------"<<endl;
-    cout << "Priv key: " << privatekey << endl;
+    // Derive the shared secret
+    EVP_PKEY_CTX* ctx_drv = EVP_PKEY_CTX_new(myPublicKey, NULL);
+    EVP_PKEY_derive_init(ctx_drv);
+    if (1 != EVP_PKEY_derive_set_peer(ctx_drv, partyPublicKey)) {
+        handleErrors();
+    }
+    unsigned char* secret;
 
-    //Retrieve IV
+    /* Retrieving shared secret’s length */
+    size_t secretlen;
+    if (1 != EVP_PKEY_derive(ctx_drv, NULL, &secretlen)) {
+        handleErrors();
+    }
+    /* Deriving shared secret */
+    secret = (unsigned char*)malloc(secretlen);
+    if (secret == NULL) {
+        handleErrors();
+    }
+    if (1 != EVP_PKEY_derive(ctx_drv, secret, &secretlen)) {
+        handleErrors();
+    }
+    EVP_PKEY_CTX_free(ctx_drv);
 
-    unsigned char* iv = (unsigned char*)malloc(EVP_CIPHER_iv_length(EVP_aes_128_cbc()));
-    if (!iv) return NULL;
-    int iv_len = EVP_CIPHER_iv_length(EVP_aes_128_cbc());
+    // We need to derive the hash of the shared secret now
+    cout<<"Hashing the shared secret . . ."<<endl;
+    unsigned char* digest;
+    unsigned int digestlen;
+    EVP_MD_CTX* digest_ctx;
+    /* Buffer allocation for the digest */
+    digest = (unsigned char*)malloc(EVP_MD_size(EVP_sha256()));
+    if (!digest) return nullptr;
+    /* Context allocation */
+    digest_ctx = EVP_MD_CTX_new();
+
+    /* Hashing (initialization + single update + finalization */
+    EVP_DigestInit(digest_ctx, EVP_sha256());
+    EVP_DigestUpdate(digest_ctx, secret, sizeof(secret));
+    EVP_DigestFinal(digest_ctx, digest, &digestlen);
+    /* Context deallocation */
+    EVP_MD_CTX_free(digest_ctx);
+
+    // Taking first 128 bits of the digest
+    // Get first 16 bytes of shared secret, to use as key in AES
+    unsigned char *key = (unsigned char*)malloc(16);
+    if (!key) return nullptr;
+    memcpy(key,digest,16);
+
+    free(secret);
+    free(digest);
 
     int pos = 0;
-    memcpy(iv,msg,iv_len);
-    pos += iv_len;
+    // retrieve IV
+    unsigned char iv_gcm[IV_LEN];
+    memcpy(iv_gcm,msg+pos,IV_LEN);
+    pos += IV_LEN;
 
-    cout << "IV len in decryption: " << iv_len << endl;
+    // retrieve AAD
+    unsigned int count;
+    memcpy((char*)&count, msg+pos,AAD_LEN);
+    pos += AAD_LEN;
 
-    //Retrive encrypted_key
+    unsigned int payload_size;
+    memcpy((char*)&payload_size,msg+pos,AAD_LEN);
+    pos += AAD_LEN;
 
-    unsigned char* encrypted_key = (unsigned char*)malloc(EVP_PKEY_size(publickey));
-    if (!encrypted_key) return NULL;
-    int encrypted_key_len = EVP_PKEY_size(privatekey);
+    unsigned char* message = new unsigned char[payload_size];
+    memcpy(message,msg+pos,payload_size);
+    pos += payload_size;
+
+    // retrieve encrypted data
+    size_t encrypted_len = numOfBytesReceived - 16 - IV_LEN - AAD_LEN - AAD_LEN - payload_size;
+    unsigned char encryptedData[encrypted_len];
+    memcpy(encryptedData,msg+pos,encrypted_len);
+    pos += encrypted_len;
+
+    // retrieve tag
+    size_t tag_len = 16;
+    unsigned char tag[tag_len];
+    memcpy(tag, msg+pos, tag_len);
+    pos += tag_len;
+
+    unsigned char *plaintext_buffer = new unsigned char[encrypted_len];//(unsigned char*)malloc(encrypted_len+1);
+
+    // Decrypt received message with AES-128 bit GCM, store result in plaintext_buffer
+    cout<<"AES GCM decryption . . ."<<endl;
+    cout<<"-----------------"<<endl;
+
+    unsigned char* total_aad = new unsigned char[AAD_LEN+AAD_LEN+payload_size];
+    int init = 0;
+
+    memcpy(total_aad+init,(char*)&count,AAD_LEN);
+    init += AAD_LEN;
+
+    memcpy(total_aad+init,(char*)&payload_size,AAD_LEN);
+    init += AAD_LEN;
+
+    memcpy(total_aad+init,message,payload_size);
+
     
-    memcpy(encrypted_key,msg+pos,encrypted_key_len);
-    pos += encrypted_key_len;
+    gcm_decrypt(encryptedData,encrypted_len,total_aad,AAD_LEN+AAD_LEN+payload_size,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
 
-    cout << "Encrypted key len in decryption: " << encrypted_key_len << endl;
+    free(key);
 
-    //Retrive ciphertext
+    // plaintext_buffer[encrypted_len] = '\0';
 
+    auto *ret_buffer = new unsigned char[encrypted_len + AAD_LEN + payload_size];
 
-    int cipherlen = msg_len-iv_len-encrypted_key_len;
-    unsigned char* ciphertext = (unsigned char*)malloc(cipherlen);
-    if (!ciphertext) return NULL;
-    memcpy(ciphertext,msg+pos,cipherlen);
+    int fi = 0;
+    memcpy(ret_buffer+pos,plaintext_buffer,encrypted_len);
+    fi += encrypted_len;
 
-    cout << "Ciphertext len in decryption: " << cipherlen << endl;
+    memcpy(ret_buffer+pos,(char*)&payload_size,AAD_LEN);
+    fi += AAD_LEN;
 
-    unsigned char* plaintext = (unsigned char*)malloc(cipherlen);
-    if (!plaintext) return NULL;
-    int outlen, plainlen;
+    memcpy(ret_buffer+pos,message,payload_size);
 
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    int ret = EVP_OpenInit(ctx,EVP_aes_128_cbc(),encrypted_key,encrypted_key_len,iv,privatekey);
-    if(ret == 0){
-        cout<<"Error with OpenInit during decryption"<<endl;
-        ERR_print_errors_fp(stderr);
-        return NULL;
-    }
+    return ret_buffer;
 
-    EVP_OpenUpdate(ctx,plaintext,&outlen,ciphertext,cipherlen);
-    plainlen = outlen;
-    ret = EVP_OpenFinal(ctx,plaintext+plainlen,&outlen);
-    if(ret == 0){
-        cout<<"Error with OpenFinal during decryption"<<endl;
-        return NULL;
-    }
-    plainlen += outlen;
-    EVP_CIPHER_CTX_free(ctx);
-
-    // Cleaning
-    free(iv);
-    free(encrypted_key);
-    free(ciphertext);
-
-    cout<<"Message decrypted correctly"<<endl;
-
-    return plaintext;
 }
+
+
+// // ASYMMETRIC ENCRYPTION (Used for DH Public key exchange in the authentication phase)
+
+// unsigned char* asymmetric_enc(unsigned char* msg_to_enc, int numBytes, EVP_PKEY* publickey, size_t *length){
+    
+//     cout << "------ASYMMETRIC ENCRYPTION------"<<endl;
+    
+//     unsigned char* encrypted_key = (unsigned char*)malloc(EVP_PKEY_size(publickey));
+//     if (!encrypted_key) return NULL;
+//     int encrypted_key_len;
+
+//     unsigned char* ciphertext = (unsigned char*)malloc(numBytes + 16);
+//     if (!ciphertext) return NULL;
+//     int outlen, cipherlen;
+
+//     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+//     unsigned char* iv = (unsigned char*)malloc(EVP_CIPHER_iv_length(EVP_aes_128_cbc()));
+//     if (!iv) return NULL;
+//     int iv_len = EVP_CIPHER_iv_length(EVP_aes_128_cbc());
+//     int ret = EVP_SealInit(ctx,EVP_aes_128_cbc(),&encrypted_key, &encrypted_key_len, iv, &publickey,1);
+
+
+//     if(ret == 0 ){
+//         cout<<"Error with SealInit during encryption"<<endl;
+//         return NULL;
+//     }
+
+//     ret = EVP_SealUpdate(ctx,&ciphertext[0],&outlen,msg_to_enc,numBytes);
+//     if(ret == 0 ){
+//         ERR_print_errors_fp(stderr);
+//         cout<<"Error with SealUpdate during encryption"<<endl;
+//         return NULL;
+//     }
+
+//     cipherlen = outlen;
+//     ret = EVP_SealFinal(ctx,ciphertext+cipherlen, &outlen);
+//     if(ret == 0 ){
+//         cout<<"Error with SealFinal during encryption"<<endl;
+//         return NULL;
+//     }
+
+//     cipherlen += outlen;
+//     EVP_CIPHER_CTX_free(ctx);
+
+//     auto* buffer = new unsigned char[iv_len + encrypted_key_len + cipherlen];
+
+//     //copy iv
+
+//     int pos = 0;
+//     memcpy(buffer+pos,iv,iv_len);
+//     pos += iv_len;
+
+//     //copy key
+
+//     memcpy(buffer+pos,encrypted_key,encrypted_key_len);
+//     pos += encrypted_key_len;
+
+//     //copy ciphertext
+
+//     memcpy(buffer+pos,ciphertext,cipherlen);
+
+//     cout << "Len of the encrypted buffer: " << iv_len+encrypted_key_len+cipherlen << endl;
+
+//     // Storing length of the message
+//     *length = iv_len + encrypted_key_len + cipherlen;
+
+//     // Cleaning
+//     free(iv);
+//     free(encrypted_key);
+//     free(ciphertext);
+
+//     cout<<"Encrypted message successfully"<<endl;
+
+//     return buffer;
+// }
+
+
+
+// unsigned char* asymmetric_dec(unsigned char* msg, int msg_len, EVP_PKEY* privatekey,EVP_PKEY* publickey){
+
+//     // int msg_len = strlen((char*)msg);
+//     cout << "------ASYMMETRIC DECRYPTION------"<<endl;
+//     cout << "Priv key: " << privatekey << endl;
+
+//     //Retrieve IV
+
+//     unsigned char* iv = (unsigned char*)malloc(EVP_CIPHER_iv_length(EVP_aes_128_cbc()));
+//     if (!iv) return NULL;
+//     int iv_len = EVP_CIPHER_iv_length(EVP_aes_128_cbc());
+
+//     int pos = 0;
+//     memcpy(iv,msg,iv_len);
+//     pos += iv_len;
+
+//     cout << "IV len in decryption: " << iv_len << endl;
+
+//     //Retrive encrypted_key
+
+//     unsigned char* encrypted_key = (unsigned char*)malloc(EVP_PKEY_size(publickey));
+//     if (!encrypted_key) return NULL;
+//     int encrypted_key_len = EVP_PKEY_size(privatekey);
+    
+//     memcpy(encrypted_key,msg+pos,encrypted_key_len);
+//     pos += encrypted_key_len;
+
+//     cout << "Encrypted key len in decryption: " << encrypted_key_len << endl;
+
+//     //Retrive ciphertext
+
+
+//     int cipherlen = msg_len-iv_len-encrypted_key_len;
+//     unsigned char* ciphertext = (unsigned char*)malloc(cipherlen);
+//     if (!ciphertext) return NULL;
+//     memcpy(ciphertext,msg+pos,cipherlen);
+
+//     cout << "Ciphertext len in decryption: " << cipherlen << endl;
+
+//     unsigned char* plaintext = (unsigned char*)malloc(cipherlen);
+//     if (!plaintext) return NULL;
+//     int outlen, plainlen;
+
+//     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+//     int ret = EVP_OpenInit(ctx,EVP_aes_128_cbc(),encrypted_key,encrypted_key_len,iv,privatekey);
+//     if(ret == 0){
+//         cout<<"Error with OpenInit during decryption"<<endl;
+//         ERR_print_errors_fp(stderr);
+//         return NULL;
+//     }
+
+//     EVP_OpenUpdate(ctx,plaintext,&outlen,ciphertext,cipherlen);
+//     plainlen = outlen;
+//     ret = EVP_OpenFinal(ctx,plaintext+plainlen,&outlen);
+//     if(ret == 0){
+//         cout<<"Error with OpenFinal during decryption"<<endl;
+//         return NULL;
+//     }
+//     plainlen += outlen;
+//     EVP_CIPHER_CTX_free(ctx);
+
+//     // Cleaning
+//     free(iv);
+//     free(encrypted_key);
+//     free(ciphertext);
+
+//     cout<<"Message decrypted correctly"<<endl;
+
+//     return plaintext;
+// }
 
 #endif

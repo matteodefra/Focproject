@@ -63,6 +63,8 @@ public:
 
     EVP_PKEY* serverRSApubkey;
 
+    unsigned char * nonceAccept;
+
     // Start server routine
     pipe_ret_t start(int port);
 
@@ -113,6 +115,8 @@ public:
     // Add or remove eventually new observers
     void subscribe(const server_observer_t & observer);
     void unsubscribeAll();
+
+    unsigned char* recoverKey(Client &clientOne,Client &clientTwo,bool nonce);
 
   
     // Useful functions

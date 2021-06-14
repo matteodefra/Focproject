@@ -55,8 +55,8 @@ public:
     // Handler thread for the client thread 
     std::thread * m_threadHandler = nullptr;
     // Counter for replay attacks
-    unsigned char *c_counter;
-    unsigned char *s_counter;
+    unsigned int c_counter;
+    unsigned int s_counter;
 
     bool authenticationPeer = false;
 
@@ -117,6 +117,11 @@ public:
     }
     std::string getChattingClientIp() const { return ipChattingClient; }
     int getChattingClientSocket() const { return socketChattingClient; }
+
+    void resetReqValues() {
+        ipChattingClient.erase(ipChattingClient.begin(),ipChattingClient.end());
+        socketChattingClient = 0;
+    }
 
     void setClientKeyDH(EVP_PKEY *pubkey) { clientPubKeyDH = pubkey; }
     EVP_PKEY* getClientKeyDH() { return clientPubKeyDH; } 

@@ -79,12 +79,13 @@ public:
     // DH pubkey for peer to peer communication
     EVP_PKEY *mypubkey_p2p;
 
+    unsigned char* nonceAccept;
 
-    unsigned char* c_counter;
-    unsigned char* s_counter;
+    unsigned int c_counter;
+    unsigned int s_counter;
 
-    unsigned char* myPeerCounter;
-    unsigned char* peerCounter;
+    unsigned int myPeerCounter;
+    unsigned int peerCounter;
     
     ~TcpClient();
 
@@ -126,6 +127,8 @@ public:
     void setAndStorePeerKey(unsigned char *key);
 
     void saveMyKey();
+
+    unsigned char* insertNonceAccept(string msg);
 
     int generateDHKeypairs();
     int generateDHKeypairsForP2P();

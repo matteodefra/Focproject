@@ -81,6 +81,7 @@ public:
 
     unsigned char* nonceAccept;
 
+
     unsigned int c_counter;
     unsigned int s_counter;
 

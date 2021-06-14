@@ -154,23 +154,47 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     client->authenticationPeer = false;
                 }
                 else {
+ 
+                    cout << "server message received:L " << endl;
+                    BIO_dump_fp(stdout,msg,numOfBytesReceived);
+ 
+                    auto *decryptedVal = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH(),client->c_counter);
 
-                    cout<<"-----------------"<<endl;
-                    cout<<"Verify :FORWARD payload"<<endl;
-                    int forward_message_len = AAD_LEN + IV_LEN + 16 + strlen(":FORWARD");
-                    BIO_dump_fp(stdout,msg,forward_message_len);
-                    // Server need to decrypt first part of the message, length is known a priori
-                    unsigned char* plaintext_buf = deriveAndDecryptMessage(msg,forward_message_len,getDHPublicKey(),client->getClientKeyDH(),client->c_counter);
-
-                    incrementCounter(client->c_counter);
-
-                    if (strncmp((char*)plaintext_buf,":FORWARD",8) == 0) {
+                    client->c_counter ++;
+ 
+                    sendToClient(receiver,(char*)decryptedVal,strlen((char*)decryptedVal));
+                    /*
+                    if (strncmp((char*)decryptedVal,":FORWARD",8) == 0) {
+ 
+                        int pos = 0;
+                        unsigned int pippo;
+                        memcpy((char*)&pippo,decryptedVal+8,AAD_LEN);
+                        pos += 8;
+                        pos += AAD_LEN;
+ 
+                        char *message = (char*)decryptedVal+12;
+ 
                         cout<<"-----------------"<<endl;
                         cout<<"Successfull verification"<<endl; 
-                        sendToClient(receiver,msg+forward_message_len,numOfBytesReceived-forward_message_len);
-                    }
+                        sendToClient(receiver,message,pippo);
+                    }*/
+ 
+                    // cout<<"-----------------"<<endl;
+                    // cout<<"Verify :FORWARD payload"<<endl;
+                    // int forward_message_len = AAD_LEN + IV_LEN + 16 + strlen(":FORWARD");
+                    // BIO_dump_fp(stdout,msg,forward_message_len);
+                    // // Server need to decrypt first part of the message, length is known a priori
+                    // unsigned char* plaintext_buf = deriveAndDecryptMessage(msg,forward_message_len,getDHPublicKey(),client->getClientKeyDH(),client->c_counter);
+ 
+                    // // incrementCounter(client->c_counter);
+                    // client->c_counter += 1;
+ 
+                    // if (strncmp((char*)plaintext_buf,":FORWARD",8) == 0) {
+                    //     cout<<"-----------------"<<endl;
+                    //     cout<<"Successfull verification"<<endl; 
+                    //     sendToClient(receiver,msg+forward_message_len,numOfBytesReceived-forward_message_len);
+                    // }
                 }
-
             }
         
             else {

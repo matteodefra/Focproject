@@ -186,7 +186,8 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
                     incrementCounter(client->c_counter);
 
-                    bool val = inputSanitization((char*)plaintext_buffer);
+                    bool val = true;
+                    if(strncmp(msg,":ACCEPT",7) == 0) val = inputSanitization((char*)plaintext_buffer);
                     if (!val) {
                         Client &receiver = getClient(*client);
                         string answer = "Error: special characters are not allowed";
@@ -413,20 +414,32 @@ Client& TcpServer::getClient(Client &client) {
 /**
  * Recover the public key of clientTwo and create message for clientOne
  */
-unsigned char* recoverKey(Client &clientOne,Client &clientTwo) {
+unsigned char* TcpServer::recoverKey(Client &clientOne,Client &clientTwo,bool nonce) {
 
     size_t keylen;
-	unsigned char *key = pem_serialize_pubkey(clientTwo.getClientKeyDH(), &keylen);
+	unsigned char *key = pem_serialize_pubkey(clientTwo.getClientKeyRSA(), &keylen);
 
     if (!key) {
         handleErrors();
     }
 
+    int buffer_len;
+
+    if (nonce) buffer_len = 4+keylen+NONCE_LEN;
+        else buffer_len = 4+keylen;
+
+    auto *buffer = new unsigned char[buffer_len];
+
+
     int pos = 0;
-    auto *buffer = new unsigned char[4+keylen];
 
     memcpy(buffer+pos,":KEY",4);
     pos += 4;
+
+    if(nonce){
+        memcpy(buffer+pos,nonceAccept,NONCE_LEN);
+        pos += NONCE_LEN;
+    }
 
     memcpy(buffer+pos,key,keylen);
     pos += keylen;
@@ -643,6 +656,7 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
                 ret = sendToClient(client,response.c_str(),strlen(response.c_str()));
             } else{
                 client.resetRequest();
+                client.resetReqValues();
                 string response = "Request denied";
                 ret = sendToClient(requestingClient,(char*)response.c_str(),strlen(response.c_str()));
             }
@@ -668,8 +682,17 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
 
                 cout<<"Exchanging the keys between the two clients . . ."<<endl;
                 
-                unsigned char *messageOne = recoverKey(requestingClient,client);
-                unsigned char *messageTwo = recoverKey(client,requestingClient);
+
+                cout<<"REQ_ACCEPT:"<<endl;
+                cout<<request.c_str()<<endl;
+                //Retrieving nonce accept
+                nonceAccept = new unsigned char[NONCE_LEN];
+                memcpy(nonceAccept, request.c_str()+7, NONCE_LEN);
+                cout<<"nonceAccept: "<<endl;
+                BIO_dump_fp(stdout,(char*)nonceAccept,NONCE_LEN);
+
+                unsigned char *messageOne = recoverKey(requestingClient,client,true);
+                unsigned char *messageTwo = recoverKey(client,requestingClient,false);
                 storeRequestingInfo(requestingClient,client);
                 client.authenticationPeer = true;
                 requestingClient.authenticationPeer = true;
@@ -680,6 +703,8 @@ void TcpServer::processRequest(Client &client,string decryptedMessage) {
                 cout << "Second message to send" << endl;
                 cout << messageTwo;
                 cout<<"-----------------"<<endl;
+
+                delete nonceAccept;
 
                 ret = sendToClient(requestingClient,(char*)messageOne,strlen((char*)messageOne));
                 ret = sendToClient(client,(char*)messageTwo,strlen((char*)messageTwo));

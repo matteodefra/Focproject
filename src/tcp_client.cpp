@@ -265,6 +265,41 @@ void TcpClient::saveMyKey() {
     return;
 }
 
+unsigned char* TcpClient::insertNonceAccept(string msg){ //:ACCEPT
+
+    RAND_poll();
+
+    unsigned char* nonce =  new unsigned char[NONCE_LEN];
+
+    cout<<"Creating a nonce . . ."<<endl;
+
+    int result = RAND_bytes(nonce,NONCE_LEN);
+
+    if (result != 1) {
+        cout << "Error creating nonce(ACCEPT)"<<endl;
+    }
+
+    cout<<"Nonce created during ACCEPT: "<<endl;
+    BIO_dump_fp(stdout,(char*)nonce,NONCE_LEN);
+
+    nonceAccept = nonce;
+
+    unsigned char* ret = new unsigned char[msg.size() + NONCE_LEN];
+
+    //Copy msg
+
+    int pos = 0;
+
+    memcpy(ret,(char*)msg.c_str(),msg.size());
+
+    pos += msg.size();
+
+    //Copy nonce
+
+    memcpy(ret+pos,nonce,16);
+
+    return ret;
+}
 
 /**
  * Allow a client to send a message to the server.
@@ -363,6 +398,14 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 
         if (strncmp(msg,":REQ",4) == 0) {
             sendingRequest = true;
+        }
+
+        if (strncmp(msg,":ACCEPT",7) == 0) {
+            unsigned char* ret = insertNonceAccept(msg);
+            msg = (char*)ret;
+            cout<<"ACCEPT msg client side: " <<endl;
+            cout<< msg<<endl;
+            size += NONCE_LEN;
         }
 
         cout << "Counter for encryption: " << endl;
@@ -958,13 +1001,27 @@ void TcpClient::processRequest(unsigned char* plaintext_buffer, int receivedByte
         setChatting();
 
         // Move pointer to key
-        unsigned char *key = plaintext_buffer + 4;
+
+        unsigned char* key;
+        if(sendingRequest){
+            key = plaintext_buffer + 4 + NONCE_LEN;
+        } else {
+            key = plaintext_buffer +4;
+        }
 
         peerRSAKey = pem_deserialize_pubkey(key,strlen((char*)key));
 
         if (sendingRequest) {
+
             // If true, this is the first delivering client
-            // Must deliver <nonce1+counter1+new pubkeyDH1>signature(all)
+            // Must deliver <nonce1+nonceAccept+counter1+new pubkeyDH1>signature(all)
+
+
+            nonceAccept = new unsigned char[NONCE_LEN];
+            memcpy(nonceAccept,plaintext_buffer+4,NONCE_LEN);
+            cout<<"NonceAccept client m5:"<<endl;
+            BIO_dump_fp(stdout,(char*)nonceAccept,NONCE_LEN);
+            
             pipe_ret_t ret = sendAndReceiveSignature();
             sendingRequest = false;
         }
@@ -1124,14 +1181,18 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
     BIO_dump_fp(stdout,(char*)nonce1,NONCE_LEN);
 
 
-    int msg_to_sign_len = NONCE_LEN + AAD_LEN + sizeof(int) + pubkey_len;
-
+    int msg_to_sign_len = NONCE_LEN + NONCE_LEN + AAD_LEN + sizeof(int) + pubkey_len;
     auto* msg_to_be_signed = new unsigned char[msg_to_sign_len];
-    
+
 
     int start = 0;
-    memcpy(msg_to_be_signed + start,nonce1,NONCE_LEN); //nonce
+    memcpy(msg_to_be_signed + start,nonce1,NONCE_LEN); //nonce generated 
     start += NONCE_LEN;
+
+    memcpy(msg_to_be_signed + start,nonceAccept,NONCE_LEN); //nonce Accept
+    start += NONCE_LEN;
+
+    delete nonceAccept;
 
     memcpy(msg_to_be_signed + start,counter1,AAD_LEN); //c_nonce
     start += AAD_LEN;
@@ -1358,6 +1419,7 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
     //VERIFY SIGNATURE
 
     unsigned char* nonce_extracted = new unsigned char[NONCE_LEN]; //nonce
+    unsigned char* nonce_accept = new unsigned char[NONCE_LEN]; //nonce Accept
     unsigned char* counter_extracted = new unsigned char[AAD_LEN]; //counter
 
     //retrieve nonce
@@ -1365,6 +1427,12 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
 
     memcpy(nonce_extracted,msg_rec + pos_n,NONCE_LEN);
     pos_n += NONCE_LEN;
+
+    //retrieve nonce accepted
+
+    memcpy(nonce_accept,msg_rec + pos_n,NONCE_LEN);
+    pos_n += NONCE_LEN;
+    
 
     //retrieve counter 
 
@@ -1378,7 +1446,7 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
     memcpy((char*)&dhpubkey_len,msg_rec + pos_n,sizeof(int));
     pos_n += sizeof(int);
 
-    int clear_buf_len = NONCE_LEN + AAD_LEN + sizeof(int) + dhpubkey_len; 
+    int clear_buf_len = NONCE_LEN + NONCE_LEN + AAD_LEN + sizeof(int) + dhpubkey_len; 
     auto *clear_buf = new unsigned char[clear_buf_len];
 
     int signature_len2 = numOfBytesReceived-clear_buf_len;
@@ -1429,10 +1497,24 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
 
     cout<<"-----------------"<<endl;
     cout<<"Peer DH public key:"<<endl;
-    cout<<clear_buf+NONCE_LEN + AAD_LEN + sizeof(int) <<endl;
+    cout<<clear_buf+NONCE_LEN + NONCE_LEN + AAD_LEN + sizeof(int) <<endl;
     cout<<"-----------------"<<endl;
 
-    peerKey = pem_deserialize_pubkey(clear_buf+NONCE_LEN+AAD_LEN+sizeof(int),dhpubkey_len);
+    peerKey = pem_deserialize_pubkey(clear_buf+NONCE_LEN+NONCE_LEN+AAD_LEN+sizeof(int),dhpubkey_len);
+
+
+    //Nonce Accept comparison
+
+    if(strcmp((char*)nonce_accept, (char*)nonceAccept) == 0){
+        cout<<"Nonce Accept comparison failed"<<endl;
+        ret.success = false;
+        return ret;
+    }
+
+    cout<<"Nonce Accept comparison successed"<<endl;
+
+    delete nonceAccept;
+    delete nonce_accept;
 
     delete clear_buf;
     delete signature2;

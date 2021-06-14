@@ -115,6 +115,12 @@ public:
         ipChattingClient = ip; 
         socketChattingClient = socket;    
     }
+
+    void resetReqValues() {
+        ipChattingClient.erase(ipChattingClient.begin(),ipChattingClient.end());
+        socketChattingClient = 0;
+    }
+    
     std::string getChattingClientIp() const { return ipChattingClient; }
     int getChattingClientSocket() const { return socketChattingClient; }
 

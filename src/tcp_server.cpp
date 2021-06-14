@@ -185,6 +185,13 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     /*
                     if (strncmp((char*)decryptedVal,":FORWARD",8) == 0) {
  
+
+                    auto *decryptedVal = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH(),client->c_counter);
+
+
+
+                    if (strncmp((char*)decryptedVal,":FORWARD",8) == 0) {
+
                         int pos = 0;
                         unsigned int pippo;
                         memcpy((char*)&pippo,decryptedVal+8,AAD_LEN);
@@ -208,6 +215,10 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     // // incrementCounter(client->c_counter);
                     // client->c_counter += 1;
  
+
+                    // // incrementCounter(client->c_counter);
+                    // client->c_counter += 1;
+
                     // if (strncmp((char*)plaintext_buf,":FORWARD",8) == 0) {
                     //     cout<<"-----------------"<<endl;
                     //     cout<<"Successfull verification"<<endl; 

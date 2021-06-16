@@ -150,7 +150,36 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
                 if (client->authenticationPeer == true) {
                     cout << "Entra qui?" << endl;
-                    sendToClient(receiver,msg,numOfBytesReceived);
+
+                    cout << "Bytes received: " << numOfBytesReceived << endl;
+
+                    cout << "Encrypted signature arrived: " << endl;
+                    BIO_dump_fp(stdout,msg,numOfBytesReceived);
+
+                    cout << "Decryption counter: " << client->c_counter << endl;
+
+                    unsigned char* decryptSignature = deriveAndDecryptMessage(msg,numOfBytesReceived,getDHPublicKey(),client->getClientKeyDH(),client->c_counter);
+
+                    int decryptLen = numOfBytesReceived-AAD_LEN-IV_LEN-16;
+
+                    cout << "Signature decrypted: " << endl;
+                    BIO_dump_fp(stdout,(char*)decryptSignature,decryptLen);
+
+                    // decryptSignature = (unsigned char*)realloc(decryptSignature,decryptLen);
+
+                    // cout << "First signature received: " << endl;
+                    
+
+                    client->c_counter += 1;
+
+                    unsigned char* encrypteForPeer = deriveAndEncryptMessage((char*)decryptSignature,decryptLen,getDHPublicKey(),receiver.getClientKeyDH(),receiver.s_counter);
+
+                    cout << "Encrypted signature for other: " << endl;
+                    BIO_dump_fp(stdout,(char*)encrypteForPeer,decryptLen+AAD_LEN+IV_LEN+16);
+
+                    receiver.s_counter += 1;
+
+                    sendToClient(receiver,reinterpret_cast<char*>(encrypteForPeer),decryptLen+AAD_LEN+16+IV_LEN);
                     client->authenticationPeer = false;
                 }
                 else {
@@ -166,6 +195,13 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     /*
                     if (strncmp((char*)decryptedVal,":FORWARD",8) == 0) {
  
+
+                    auto *decryptedVal = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH(),client->c_counter);
+
+
+
+                    if (strncmp((char*)decryptedVal,":FORWARD",8) == 0) {
+
                         int pos = 0;
                         unsigned int pippo;
                         memcpy((char*)&pippo,decryptedVal+8,AAD_LEN);
@@ -189,6 +225,10 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     // // incrementCounter(client->c_counter);
                     // client->c_counter += 1;
  
+
+                    // // incrementCounter(client->c_counter);
+                    // client->c_counter += 1;
+
                     // if (strncmp((char*)plaintext_buf,":FORWARD",8) == 0) {
                     //     cout<<"-----------------"<<endl;
                     //     cout<<"Successfull verification"<<endl; 
@@ -203,12 +243,12 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                 } 
                 else{
 
-                    cout << "Counter for decryption: " << endl;
-                    BIO_dump_fp(stdout,(char*)client->c_counter,12);
+                    cout << "Counter for decryption: "<< client->c_counter << endl;
 
                     unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH(),client->c_counter);
 
-                    incrementCounter(client->c_counter);
+                    // incrementCounter(client->c_counter);
+                    client->c_counter += 1;
 
                     bool val = true;
                     if(strncmp(msg,":ACCEPT",7) == 0) val = inputSanitization((char*)plaintext_buffer);
@@ -442,6 +482,9 @@ unsigned char* TcpServer::recoverKey(Client &clientOne,Client &clientTwo,bool no
 
     size_t keylen;
 	unsigned char *key = pem_serialize_pubkey(clientTwo.getClientKeyRSA(), &keylen);
+
+
+    cout << "Client RSA key: " << key << endl;
 
     if (!key) {
         handleErrors();
@@ -761,8 +804,8 @@ bool TcpServer::deleteClient(Client & client) {
         if (m_clients[i] == client) {
             if ( !m_clients[i].getClientKeyRSA() ) EVP_PKEY_free(m_clients[i].getClientKeyRSA());
             if ( !m_clients[i].getClientKeyDH() ) EVP_PKEY_free(m_clients[i].getClientKeyDH());
-            if ( !m_clients[i].c_counter ) free(m_clients[i].c_counter);
-            if ( !m_clients[i].s_counter ) free(m_clients[i].s_counter);
+            // if ( !m_clients[i].c_counter ) free(m_clients[i].c_counter);
+            // if ( !m_clients[i].s_counter ) free(m_clients[i].s_counter);
             clientIndex = i;
             break;
         }
@@ -1074,9 +1117,11 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 
         //extract c_counter
 
-        unsigned char* c_counter_extracted = new unsigned char[AAD_LEN];
+        // unsigned char* c_counter_extracted = new unsigned char[AAD_LEN];
+        unsigned int c_counter_extracted;
 
-        memcpy(c_counter_extracted,msg_rcved+position_, AAD_LEN);
+
+        memcpy((char*)&c_counter_extracted,msg_rcved+position_, AAD_LEN);
         position_ += AAD_LEN;
 
         //extract pubkey length 
@@ -1154,14 +1199,14 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 
         //set c_counter
 
-        client.c_counter = (unsigned char*)malloc(AAD_LEN);
-        memcpy(client.c_counter,c_counter_extracted,AAD_LEN);
+        // client.c_counter = (unsigned char*)malloc(AAD_LEN);
+        // memcpy(client.c_counter,c_counter_extracted,AAD_LEN);
+        client.c_counter = c_counter_extracted;
 
-        cout << "Client counter: " <<endl;
-        BIO_dump_fp(stdout,(char*)c_counter_extracted,AAD_LEN);
+        cout << "Client counter: " << client.c_counter <<endl;
         cout<<"-----------------"<<endl;
 
-        delete c_counter_extracted;
+        // delete c_counter_extracted;
 
 
         // Client DH Pubkey
@@ -1200,23 +1245,23 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client,unsigned char* nonce2){
 
     cout<<"Generating random counter for replay attacks"<<endl;
 
-    unsigned char* s_counter = new unsigned char [AAD_LEN];
+    // unsigned char* s_counter = new unsigned char [AAD_LEN];
 
-    RAND_poll();
+    // RAND_poll();
 
-    int rnd_result = RAND_bytes(s_counter,AAD_LEN);
+    // int rnd_result = RAND_bytes(s_counter,AAD_LEN);
 
-    if (rnd_result != 1) {
-        cout << "Error generating the s_counter" << endl;
-        ret.success = false;
-        return ret;
-    }    
+    // if (rnd_result != 1) {
+    //     cout << "Error generating the s_counter" << endl;
+    //     ret.success = false;
+    //     return ret;
+    // }    
     
-    client.s_counter = (unsigned char*)malloc(AAD_LEN);
-    memcpy(client.s_counter,s_counter, AAD_LEN);
+    // client.s_counter = (unsigned char*)malloc(AAD_LEN);
+    // memcpy(client.s_counter,s_counter, AAD_LEN);
+    client.s_counter = 0;
 
-    cout << "Server counter: " <<endl;
-    BIO_dump_fp(stdout,(char*)s_counter,AAD_LEN);
+    cout << "Server counter: " << client.s_counter <<endl;
     cout<<"-----------------"<<endl;
     
 
@@ -1239,10 +1284,10 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client,unsigned char* nonce2){
 
     //copy s_counter
 
-    memcpy(publicKey_msg+pos,s_counter,AAD_LEN);
+    memcpy(publicKey_msg+pos,(char*)&client.s_counter,AAD_LEN);
     pos += AAD_LEN;
 
-    delete s_counter;
+    // delete s_counter;
 
     //copy pubkey length
 
@@ -1445,19 +1490,19 @@ pipe_ret_t TcpServer::sendToClient(Client & client, const char * msg, size_t siz
             client.setChatting();
         }
 
-        cout << "Counter for encryption: " << endl;
-        BIO_dump_fp(stdout,(char*)client.s_counter,12);
+        cout << "Counter for encryption: "<< client.s_counter << endl;
 
         auto* buffer = deriveAndEncryptMessage(msg,size,getDHPublicKey(),client.getClientKeyDH(),client.s_counter);
 
-        incrementCounter(client.s_counter);
+        // incrementCounter(client.s_counter);
+        client.s_counter += 1;
 
         cout << "Server, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
         cout<<"-----------------"<<endl;
         cout<<endl;
 
-        int numBytesSent = send(client.getFileDescriptor(), buffer, 12/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
+        int numBytesSent = send(client.getFileDescriptor(), buffer, AAD_LEN/*aad_len*/+strlen(msg)+16/*tag_len*/+IV_LEN/*iv_len*/, 0);
         if (numBytesSent < 0) { // send failed
             ret.success = false;
             ret.msg = strerror(errno);
@@ -1490,8 +1535,8 @@ pipe_ret_t TcpServer::finish() {
         m_clients[i].setDisconnected();
         if ( !m_clients[i].getClientKeyDH() ) EVP_PKEY_free(m_clients[i].getClientKeyDH());
         if ( !m_clients[i].getClientKeyRSA() ) EVP_PKEY_free(m_clients[i].getClientKeyRSA());
-        if ( !m_clients[i].c_counter ) free(m_clients[i].c_counter);
-        if ( !m_clients[i].s_counter ) free(m_clients[i].s_counter);
+        // if ( !m_clients[i].c_counter ) free(m_clients[i].c_counter);
+        // if ( !m_clients[i].s_counter ) free(m_clients[i].s_counter);
         if (close(m_clients[i].getFileDescriptor()) == -1) { // close failed
             ret.success = false;
             ret.msg = strerror(errno);

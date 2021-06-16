@@ -55,8 +55,8 @@ public:
     // Handler thread for the client thread 
     std::thread * m_threadHandler = nullptr;
     // Counter for replay attacks
-    unsigned char *c_counter;
-    unsigned char *s_counter;
+    unsigned int c_counter;
+    unsigned int s_counter;
 
     bool authenticationPeer = false;
 

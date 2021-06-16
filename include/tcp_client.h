@@ -82,11 +82,11 @@ public:
     unsigned char* nonceAccept;
 
 
-    unsigned char* c_counter;
-    unsigned char* s_counter;
+    unsigned int c_counter;
+    unsigned int s_counter;
 
-    unsigned char* myPeerCounter;
-    unsigned char* peerCounter;
+    unsigned int myPeerCounter;
+    unsigned int peerCounter;
     
     ~TcpClient();
 

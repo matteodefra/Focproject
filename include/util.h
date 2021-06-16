@@ -67,6 +67,11 @@ void incrementCounter(unsigned char* counter) {
 void handleErrors(void)
 {
     ERR_print_errors_fp(stderr);
+    unsigned long e = ERR_get_error();
+    char buf[256];
+    char * error = ERR_error_string(e,buf);
+    cout << "Error: " << buf << endl;
+    cout << "Error: " << error << endl;
     abort();
 }
 
@@ -225,15 +230,15 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
     }
 
 
-    // while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
-    //     //cout << "Entra nel loop?" << endl;
-    //     if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
-    //         std::cout<<"Error in performing encryption"<<std::endl;
-    //         handleErrors();
-    //     }
-    //     ciphertext_len += len;
-    //     plaintext_len -= len;
-    // }
+    while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
+        //cout << "Entra nel loop?" << endl;
+        if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
+            std::cout<<"Error in performing encryption"<<std::endl;
+            handleErrors();
+        }
+        ciphertext_len += len;
+        plaintext_len -= len;
+    }
 
     if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, plaintext_len)){
         std::cout<<"Error in performing encryption"<<std::endl;
@@ -304,15 +309,15 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
     }
 
 
-    // while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
-    //     //cout << "Entra nel loop?" << endl;
-    //     if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
-    //         std::cout<<"Error in performing encryption"<<std::endl;
-    //         handleErrors();
-    //     }
-    //     plaintext_len += len;
-    //     ciphertext_len -= len;
-    // }
+    while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
+        //cout << "Entra nel loop?" << endl;
+        if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
+            std::cout<<"Error in performing encryption"<<std::endl;
+            handleErrors();
+        }
+        plaintext_len += len;
+        ciphertext_len -= len;
+    }
 
     if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, ciphertext_len)){
         std::cout<<"Error in performing encryption"<<std::endl;
@@ -477,7 +482,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     unsigned char *cphr_buf;
     unsigned char *tag_buf;
     int cphr_len;
-    int pt_len = strlen(msg);
+    int pt_len = size;
 
     cphr_buf = (unsigned char*)malloc(size);
     if (!cphr_buf) return nullptr;

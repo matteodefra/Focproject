@@ -406,8 +406,7 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
             size += NONCE_LEN;
         }
 
-        cout << "Counter for encryption: " << endl;
-        BIO_dump_fp(stdout,(char*)c_counter,12);
+        cout << "Counter for encryption: " << c_counter << endl;
 
         auto *buffer = deriveAndEncryptMessage(msg,size,mykey_pub,serverDHKey,c_counter);
 
@@ -1010,6 +1009,7 @@ void TcpClient::processRequest(unsigned char* plaintext_buffer, int receivedByte
         }
 
         peerRSAKey = pem_deserialize_pubkey(key,strlen((char*)key));
+        cout << "Peer RSA pubkey received: " << key << endl;
 
         if (sendingRequest) {
 
@@ -1188,11 +1188,12 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
     BIO_dump_fp(stdout,(char*)nonce1,NONCE_LEN);
 
 
-    int msg_to_sign_len = NONCE_LEN + NONCE_LEN + AAD_LEN + sizeof(int) + pubkey_len;
+    int msg_to_sign_len = NONCE_LEN + NONCE_LEN + sizeof(int) + sizeof(int) + pubkey_len;
     auto* msg_to_be_signed = new unsigned char[msg_to_sign_len];
 
 
     int start = 0;
+
     memcpy(msg_to_be_signed + start,nonce1,NONCE_LEN); //nonce generated 
     start += NONCE_LEN;
 
@@ -1201,8 +1202,8 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
 
     delete nonceAccept;
 
-    memcpy(msg_to_be_signed + start,(char*)&counter1,AAD_LEN); //c_nonce
-    start += AAD_LEN;
+    memcpy(msg_to_be_signed + start,(char*)&counter1,sizeof(int)); //c_nonce
+    start += sizeof(int);
 
     memcpy(msg_to_be_signed + start,(char*)&pubkey_len,sizeof(int)); //dh pubkey length
     start += sizeof(int);
@@ -1260,10 +1261,13 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
     memcpy(msg_to_send + start_num,signature,signature_len); //signature
     start_num += signature_len;
 
+    cout << "Message length: " << msg_to_sign_len << endl;
+    cout << "Signature length: " << signature_len << endl;
 
     cout << "Sending the client message signed . . ."<< endl;
+    BIO_dump_fp(stdout, (char*)msg_to_send,msg_to_sign_len+signature_len);
 
-    auto *encryptedSignature = deriveAndEncryptMessage((char*)msg_to_send,msg_to_sign_len+signature_len,mykey_pub,serverDHKey,c_counter);
+    auto *encryptedSignature = deriveAndEncryptMessage(reinterpret_cast<char*>(msg_to_send),msg_to_sign_len+signature_len,mykey_pub,serverDHKey,c_counter);
 
     c_counter += 1;
 
@@ -1271,7 +1275,7 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
     BIO_dump_fp(stdout, (char*)encryptedSignature,msg_to_sign_len+signature_len+AAD_LEN+IV_LEN+16);
 
     
-    int numBytesSent = send(m_sockfd, encryptedSignature, msg_to_sign_len+signature_len, 0);
+    int numBytesSent = send(m_sockfd, encryptedSignature, msg_to_sign_len+signature_len+AAD_LEN+IV_LEN+16, 0);
 
     cout << "Bytes sent: " << numBytesSent << endl;
 
@@ -1285,7 +1289,7 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
         ret.msg = strerror(errno);
         return ret;
     }
-    if ((uint)numBytesSent < msg_to_sign_len + signature_len) { // not all bytes were sent
+    if ((uint)numBytesSent < msg_to_sign_len + signature_len + AAD_LEN + IV_LEN + 16) { // not all bytes were sent
         ret.success = false;
         string msg = "Not all the bytes were sent to client";
         ret.msg = msg;
@@ -1303,6 +1307,8 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
     }    
 
     unsigned char* signatureDecrypted = deriveAndDecryptMessage(msg_rec,numOfBytesReceived,mykey_pub,serverDHKey,s_counter);
+
+    s_counter += 1;
 
     cout << "Number of bytes received is: " << numOfBytesReceived << endl;
     cout << "Dumping the total message received" << endl;
@@ -1330,8 +1336,8 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
 
     //retrieve counter 
 
-    memcpy((char*)&counter_extracted,signatureDecrypted + pos_n,AAD_LEN);
-    pos_n += AAD_LEN;
+    memcpy((char*)&counter_extracted,signatureDecrypted + pos_n,sizeof(int));
+    pos_n += sizeof(int);
 
     //retrieve pubkey len
 
@@ -1340,7 +1346,13 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
     memcpy((char*)&dhpubkey_len,signatureDecrypted + pos_n,sizeof(int));
     pos_n += sizeof(int);
 
-    int clear_buf_len = NONCE_LEN + AAD_LEN + sizeof(int) + dhpubkey_len; 
+    // retrieve publickey
+    unsigned char *publickey = new unsigned char[dhpubkey_len];
+
+    memcpy(publickey,signatureDecrypted + pos_n, dhpubkey_len);
+    pos_n += dhpubkey_len;
+
+    int clear_buf_len = NONCE_LEN + sizeof(int) + sizeof(int) + dhpubkey_len; 
     auto *clear_buf = new unsigned char[clear_buf_len];
 
     int signature_len2 = numOfBytesReceived-clear_buf_len;
@@ -1391,10 +1403,10 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
 
     cout<<"-----------------"<<endl;
     cout<<"Peer DH public key:"<<endl;
-    cout<<clear_buf+NONCE_LEN + AAD_LEN + sizeof(int) <<endl;
+    cout<< publickey <<endl;
     cout<<"-----------------"<<endl;
 
-    peerKey = pem_deserialize_pubkey(clear_buf+NONCE_LEN+AAD_LEN+sizeof(int),dhpubkey_len);
+    peerKey = pem_deserialize_pubkey(publickey,dhpubkey_len);
 
     ret.success = true;
 
@@ -1421,6 +1433,7 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
     pipe_ret_t ret;
 
     char msg_rec[MAX_PACKET_SIZE];
+    memset(msg_rec,0,MAX_PACKET_SIZE);
     int numOfBytesReceived = recv(m_sockfd, msg_rec, MAX_PACKET_SIZE, 0);
 
     if(numOfBytesReceived < 1) {
@@ -1431,9 +1444,14 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
 
     unsigned char* signatureDecrypted = deriveAndDecryptMessage(msg_rec,numOfBytesReceived,mykey_pub,serverDHKey,s_counter);
 
+    s_counter += 1;
+
     cout << "Number of bytes received is: " << numOfBytesReceived << endl;
     cout << "Dumping the total message received" << endl;
     BIO_dump_fp(stdout,msg_rec,numOfBytesReceived);
+
+    cout << "Decrypted signature: " << endl;
+    BIO_dump_fp(stdout,(char*)signatureDecrypted,numOfBytesReceived);
 
     //VERIFY SIGNATURE
 
@@ -1454,8 +1472,8 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
     
     //retrieve counter 
 
-    memcpy((char*)&counter_extracted,signatureDecrypted + pos_n,AAD_LEN);
-    pos_n += AAD_LEN;
+    memcpy((char*)&counter_extracted,signatureDecrypted + pos_n,sizeof(int));
+    pos_n += sizeof(int);
 
     //retrieve pubkey len
 
@@ -1464,11 +1482,22 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
     memcpy((char*)&dhpubkey_len,signatureDecrypted + pos_n,sizeof(int));
     pos_n += sizeof(int);
 
+    //retrieve pubkey
+    unsigned char *publickey = new unsigned char[dhpubkey_len];
+
+    memcpy(publickey,signatureDecrypted + pos_n,dhpubkey_len);
+    pos_n += dhpubkey_len;
+
+    cout << "Public key length: " << dhpubkey_len << endl;
+
     int clear_buf_len = NONCE_LEN + NONCE_LEN + AAD_LEN + sizeof(int) + dhpubkey_len; 
     auto *clear_buf = new unsigned char[clear_buf_len];
 
     int signature_len2 = numOfBytesReceived-clear_buf_len;
     auto *signature2 = new unsigned char[signature_len2];
+
+    cout << "Message length: " << clear_buf_len << endl;
+    cout << "Signature length: " << signature_len2 << endl;
 
     cout<<"-----------------"<<endl;
 
@@ -1515,10 +1544,10 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
 
     cout<<"-----------------"<<endl;
     cout<<"Peer DH public key:"<<endl;
-    cout<<clear_buf+NONCE_LEN + NONCE_LEN + AAD_LEN + sizeof(int) <<endl;
+    cout<< publickey <<endl;
     cout<<"-----------------"<<endl;
 
-    peerKey = pem_deserialize_pubkey(clear_buf+NONCE_LEN+NONCE_LEN+AAD_LEN+sizeof(int),dhpubkey_len);
+    peerKey = pem_deserialize_pubkey(publickey,dhpubkey_len);
 
 
     //Nonce Accept comparison

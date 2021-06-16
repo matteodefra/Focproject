@@ -153,23 +153,33 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
 
                     cout << "Bytes received: " << numOfBytesReceived << endl;
 
-                    // cout << "Encrypted signature arrived: " << endl;
-                    // BIO_dump_fp(stdout,msg,numOfBytesReceived);
+                    cout << "Encrypted signature arrived: " << endl;
+                    BIO_dump_fp(stdout,msg,numOfBytesReceived);
 
-                    // cout << "Decryption counter: " << client->c_counter << endl;
+                    cout << "Decryption counter: " << client->c_counter << endl;
 
-                    // unsigned char* decryptSignature = deriveAndDecryptMessage(msg,numOfBytesReceived,getDHPublicKey(),client->getClientKeyDH(),client->c_counter);
+                    unsigned char* decryptSignature = deriveAndDecryptMessage(msg,numOfBytesReceived,getDHPublicKey(),client->getClientKeyDH(),client->c_counter);
+
+                    int decryptLen = numOfBytesReceived-AAD_LEN-IV_LEN-16;
+
+                    cout << "Signature decrypted: " << endl;
+                    BIO_dump_fp(stdout,(char*)decryptSignature,decryptLen);
+
+                    // decryptSignature = (unsigned char*)realloc(decryptSignature,decryptLen);
 
                     // cout << "First signature received: " << endl;
-                    // BIO_dump_fp(stdout,(char*)decryptSignature,numOfBytesReceived);
+                    
 
-                    // client->c_counter += 1;
+                    client->c_counter += 1;
 
-                    // unsigned char* encrypteForPeer = deriveAndEncryptMessage((char*)decryptSignature,strlen((char*)decryptSignature),getDHPublicKey(),receiver.getClientKeyDH(),receiver.s_counter);
+                    unsigned char* encrypteForPeer = deriveAndEncryptMessage((char*)decryptSignature,decryptLen,getDHPublicKey(),receiver.getClientKeyDH(),receiver.s_counter);
 
-                    // receiver.s_counter += 1;
+                    cout << "Encrypted signature for other: " << endl;
+                    BIO_dump_fp(stdout,(char*)encrypteForPeer,decryptLen+AAD_LEN+IV_LEN+16);
 
-                    sendToClient(receiver,msg,numOfBytesReceived);
+                    receiver.s_counter += 1;
+
+                    sendToClient(receiver,reinterpret_cast<char*>(encrypteForPeer),decryptLen+AAD_LEN+16+IV_LEN);
                     client->authenticationPeer = false;
                 }
                 else {
@@ -472,6 +482,9 @@ unsigned char* TcpServer::recoverKey(Client &clientOne,Client &clientTwo,bool no
 
     size_t keylen;
 	unsigned char *key = pem_serialize_pubkey(clientTwo.getClientKeyRSA(), &keylen);
+
+
+    cout << "Client RSA key: " << key << endl;
 
     if (!key) {
         handleErrors();

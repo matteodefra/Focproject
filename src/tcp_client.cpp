@@ -1571,8 +1571,12 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
 
     //Nonce Accept comparison
 
-    if(strcmp((char*)nonce_accept, (char*)nonceAccept) == 0){
+    if(strncmp((char*)nonce_accept, (char*)nonceAccept,NONCE_LEN) != 0){
         cout<<"Nonce Accept comparison failed"<<endl;
+        cout<<"nonce1:"<<endl;
+        BIO_dump_fp(stdout,(char*)nonce_accept,NONCE_LEN);
+        cout<<"nonce2"<<endl;
+        BIO_dump_fp(stdout,(char*)nonceAccept,NONCE_LEN);
         ret.success = false;
         return ret;
     }

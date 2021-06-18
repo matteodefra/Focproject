@@ -466,7 +466,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     free(digest);
 
     // Also this section could be moved in an utility function
-    unsigned char msg2[size];
+    //unsigned char msg2[size];
     // strcpy((char*)msg2,msg);
 
     unsigned char iv_gcm[IV_LEN];
@@ -685,7 +685,7 @@ unsigned char* deriveAndEncryptPeerMessage(unsigned char *buffer, const char * m
     free(digest);
 
     // Also this section could be moved in an utility function
-    unsigned char msg2[strlen(msg)];
+    // unsigned char msg2[strlen(msg)];
     // strcpy((char*)msg2,msg);
 
     unsigned char iv_gcm[IV_LEN];
@@ -715,7 +715,6 @@ unsigned char* deriveAndEncryptPeerMessage(unsigned char *buffer, const char * m
 
     unsigned char *cphr_buf;
     unsigned char *tag_buf;
-    int cphr_len;
     int pt_len = strlen(msg);
     cout << "PT len: "<< pt_len << endl;
 
@@ -723,7 +722,8 @@ unsigned char* deriveAndEncryptPeerMessage(unsigned char *buffer, const char * m
     if (!cphr_buf) return nullptr;
     tag_buf = (unsigned char*)malloc(16);
     if (!tag_buf) return nullptr;
-    cphr_len = gcm_encrypt(const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(msg)),pt_len,aad,AAD_LEN+AAD_LEN+size_buffer,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
+    
+    gcm_encrypt(const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(msg)),pt_len,aad,AAD_LEN+AAD_LEN+size_buffer,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
 
     auto *buff = new unsigned char[AAD_LEN+AAD_LEN+size_buffer/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
 

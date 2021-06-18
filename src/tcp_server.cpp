@@ -143,13 +143,14 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
             cout<<"Message received from client"<<endl;
 
             if (client->isChatting()) {
+
+                bool peerDisconnected = false;
                 // Client send the message to the other party
                 // Get the client socket from the client istance and forward it
                 cout<<"Forwarding message to the other client . . ."<<endl;
                 Client &receiver = getClient(*client);
 
                 if (client->authenticationPeer == true) {
-                    cout << "Entra qui?" << endl;
 
                     cout << "Bytes received: " << numOfBytesReceived << endl;
 
@@ -186,13 +187,15 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                 }
                 else {
  
-                    cout << "server message received:L " << endl;
+                    cout << "server message received:" << endl;
                     BIO_dump_fp(stdout,msg,numOfBytesReceived);
- 
+
+                    
+    
                     auto *decryptedVal = deriveAndDecryptPeerMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH(),client->c_counter);
 
                     client->c_counter++;
- 
+
                     // sendToClient(receiver,(char*)decryptedVal,strlen((char*)decryptedVal));
                     
                     // sendToClient(receiver,msg,numOfBytesReceived);
@@ -200,16 +203,17 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     if (strncmp((char*)decryptedVal,":FORWARD",8) == 0) {
 
                         int pos = 8;
-                        unsigned int pippo;
-                        memcpy((char*)&pippo,decryptedVal+pos,AAD_LEN);
+                        unsigned int toForwardlen;
+                        memcpy((char*)&toForwardlen,decryptedVal+pos,AAD_LEN);
                         pos += AAD_LEN;
- 
+
                         char *message = (char*)decryptedVal+pos;
- 
+
                         cout<<"-----------------"<<endl;
                         cout<<"Successfull verification"<<endl; 
-                        sendToClient(receiver,message,pippo);
+                        sendToClient(receiver,message,toForwardlen);
                     }
+                    
  
                     // cout<<"-----------------"<<endl;
                     // cout<<"Verify :FORWARD payload"<<endl;

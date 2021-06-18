@@ -114,6 +114,7 @@ public:
 
     // Getter and setter
     bool getChatting() { return isChatting; }
+    void setNotChatting() { isChatting = false; }
     void setChatting() { isChatting = true; }
 
     bool getAdmin() { return isAdmin; }

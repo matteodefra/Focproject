@@ -5,7 +5,9 @@
 
 Client::~Client() {
     if (m_threadHandler != nullptr) {
-        // m_threadHandler->detach();
+        // m_threadHandler->join();
+        m_threadHandler->detach();
+        // m_threadHandler->~thread();
         delete m_threadHandler;
         m_threadHandler = nullptr;
     }

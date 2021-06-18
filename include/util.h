@@ -337,9 +337,6 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
         // handleErrors();
     }
     plaintext_len += len;
-    
-    cout << "Decrypted message: " << endl;
-    BIO_dump_fp(stdout,(char*)plaintext,plaintext_len);
 
     /* Clean up */
     EVP_CIPHER_CTX_free(ctx);
@@ -464,10 +461,6 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
 
     free(secret);
     free(digest);
-
-    // Also this section could be moved in an utility function
-    //unsigned char msg2[size];
-    // strcpy((char*)msg2,msg);
 
     unsigned char iv_gcm[IV_LEN];
 
@@ -683,10 +676,6 @@ unsigned char* deriveAndEncryptPeerMessage(unsigned char *buffer, const char * m
 
     free(secret);
     free(digest);
-
-    // Also this section could be moved in an utility function
-    // unsigned char msg2[strlen(msg)];
-    // strcpy((char*)msg2,msg);
 
     unsigned char iv_gcm[IV_LEN];
 

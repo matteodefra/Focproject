@@ -311,26 +311,27 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
  
         auto *buffer = deriveAndEncryptMessage(msg,size,mypubkey_p2p,peerKey,myPeerCounter);
  
-        // Create dummy payload for the server first message
-        // auto *forwardMessage = deriveAndEncryptMessage(":FORWARD",strlen(":FORWARD"),mykey_pub,serverDHKey,c_counter);
- 
-        // auto *totalMessage = deriveAndEncryptMessage(reinterpret_cast<const char*>(buffer),AAD_LEN+IV_LEN+size+16,mykey_pub,serverDHKey,c_counter);
- 
         unsigned int size_payload;
         size_payload = size+AAD_LEN+IV_LEN+16;
  
         auto *totalMessage = deriveAndEncryptPeerMessage(buffer,":FORWARD",mykey_pub,serverDHKey,c_counter,size_payload);
  
-        // incrementCounter(myPeerCounter);
         myPeerCounter += 1;
-        // incrementCounter(c_counter);
         c_counter += 1;
+
+        if (myPeerCounter == 0) {
+            cout << "Peer counter reached maximum value, aborting.." << endl;
+            finish();
+            abort();
+        }
+        if (c_counter == 0) {
+            cout << "Client counter reached maximum value, aborting.." << endl;
+            finish();
+            abort();
+        }
  
         cout << "Client, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,AAD_LEN + IV_LEN + 16 + strlen(msg));
- 
-        // cout << "Client, dumping the encrypted payload for server: " << endl;
-        // BIO_dump_fp(stdout,(char*)forwardMessage,AAD_LEN + IV_LEN + 16 + strlen(":FORWARD"));
  
         int total_len = IV_LEN + 16/*tag len*/ + strlen(":FORWARD") + AAD_LEN + AAD_LEN + size_payload;
  
@@ -410,8 +411,13 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
 
         auto *buffer = deriveAndEncryptMessage(msg,size,mykey_pub,serverDHKey,c_counter);
 
-        // incrementCounter(c_counter);
         c_counter += 1;
+
+        if (c_counter == 0) {
+            cout << "Client counter reached maximum value, aborting.." << endl;
+            finish();
+            abort();
+        }
 
         cout << "Client, dumping the encrypted payload: " << endl;
         BIO_dump_fp(stdout,(char*)buffer,strlen((char*)buffer));
@@ -433,6 +439,59 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
         ret.success = true;
         return ret;
     }
+}
+
+
+pipe_ret_t TcpClient::sendQuitMessage(const char* msg,size_t size) {
+    pipe_ret_t ret;
+
+    auto *buffer = deriveAndEncryptMessage(msg,size,mypubkey_p2p,peerKey,myPeerCounter);
+
+    unsigned int size_payload;
+    size_payload = size+AAD_LEN+IV_LEN+16;
+
+    auto *totalMessage = deriveAndEncryptPeerMessage(buffer,":FORWARD",mykey_pub,serverDHKey,c_counter,size_payload);
+
+    myPeerCounter += 1;
+    c_counter += 1;
+
+    if (myPeerCounter == 0) {
+        cout << "Peer counter reached maximum value, aborting.." << endl;
+        finish();
+        abort();
+    }
+    if (c_counter == 0) {
+        cout << "Client counter reached maximum value, aborting.." << endl;
+        finish();
+        abort();
+    }
+
+    cout << "Client, dumping the encrypted payload: " << endl;
+    BIO_dump_fp(stdout,(char*)buffer,AAD_LEN + IV_LEN + 16 + strlen(msg));
+
+
+    int total_len = IV_LEN + 16/*tag len*/ + strlen(":FORWARD") + AAD_LEN + AAD_LEN + size_payload;
+
+    cout << "Client, dumping the TOTAL payload for server: " << endl;
+    BIO_dump_fp(stdout,(char*)totalMessage,total_len);
+
+
+    int numBytesSent = send(m_sockfd, totalMessage, total_len, 0);
+
+    delete buffer; 
+    if (numBytesSent < 0 ) { // send failed
+        ret.success = false;
+        ret.msg = strerror(errno);
+        return ret;
+    }
+    if ((uint)numBytesSent < size) { // not all bytes were sent
+        ret.success = false;
+        string msg = "Not all the bytes were sent to client";
+        ret.msg = msg;
+        return ret;
+    }
+    ret.success = true;
+    return ret;
 }
 
 void TcpClient::subscribe(const client_observer_t & observer) {
@@ -669,16 +728,6 @@ bool TcpClient::authenticateServer() {
 
     cout<<"Generating random counter for replay attacks"<<endl;
 
-    // unsigned char* aad_gcm = (unsigned char*)malloc(AAD_LEN);
-
-    // RAND_poll();
-
-    // rnd_result = RAND_bytes(aad_gcm,AAD_LEN);
-
-    // if (rnd_result != 1) {
-    //     cout << "Error generating the counter" << endl;
-    //     return false;
-    // }    
     unsigned int aad_gcm = 0;
     
     c_counter = aad_gcm;
@@ -956,8 +1005,13 @@ void TcpClient::ReceiveTask() {
 
                 unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mypubkey_p2p,peerKey,peerCounter);
 
-                // incrementCounter(peerCounter);
                 peerCounter += 1;
+
+                if (peerCounter == 0) {
+                    cout << "Other client counter reached maximum value, aborting.." << endl;
+                    finish();
+                    abort();
+                }
 
                 // Based on message received, we need to perform some action
                 processRequest(plaintext_buffer,numOfBytesReceived);
@@ -972,8 +1026,13 @@ void TcpClient::ReceiveTask() {
                 
                 unsigned char* plaintext_buffer = deriveAndDecryptMessage(msg,numOfBytesReceived,mykey_pub,serverDHKey,s_counter);
 
-                // incrementCounter(s_counter);
                 s_counter += 1;
+
+                if (s_counter == 0) {
+                    cout << "Serer counter reached maximum value, aborting.." << endl;
+                    finish();
+                    abort();
+                }
 
                 // Based on message received, we need to perform some action
                 processRequest(plaintext_buffer,numOfBytesReceived);
@@ -995,6 +1054,13 @@ void TcpClient::setAndStorePeerKey(unsigned char* key) {
  */
 void TcpClient::processRequest(unsigned char* plaintext_buffer, int receivedBytes) {
     char *message = (char*)plaintext_buffer;
+
+    if (getChatting() && (strncmp((char*)plaintext_buffer,":QUIT",5) == 0)) {
+        cout << "The other client closed connection or quitted the request" << endl;
+        sleep(2);
+        finish();
+        abort();
+    }
 
     if (strncmp(message,":KEY",4) == 0) {
         setChatting();
@@ -1059,10 +1125,6 @@ pipe_ret_t TcpClient::finish(){
     if (!peerKey) EVP_PKEY_free(peerKey);
     if (!peerRSAKey) EVP_PKEY_free(peerRSAKey);
     if (!mypubkey_p2p) EVP_PKEY_free(mypubkey_p2p);
-    // if (!c_counter) free(c_counter);
-    // if (!s_counter) free(s_counter);
-    // if (!myPeerCounter) free(myPeerCounter);
-    // if (!peerCounter) free(peerCounter);
     pipe_ret_t ret;
     if (close(m_sockfd) == -1) { // close failed
         ret.success = false;
@@ -1125,12 +1187,6 @@ int TcpClient::generateDHKeypairsForP2P() {
 
 }
 
-//####
-
-    // Message ready to be sent!!
-
-
-
 /**
  * Asking client: will send the signature and wait for the other client signature
  */ 
@@ -1148,24 +1204,6 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
 
     cout << "DH client pubkey: " << pubkeyp2p << endl;
     cout << "Pubkey len: " << pubkey_len << endl;
-
-    // Creting counter for replay attacks 
-    // RAND_poll();
-
-    // unsigned char* counter1 =  new unsigned char[AAD_LEN];
-    // if (!counter1) {
-    //     ret.success = false;
-    //     return ret;
-    // }
-
-    // cout<<"Creating a counter . . ."<<endl;
-    // int result = RAND_bytes(counter1,AAD_LEN);
-    // if (result != 1) {
-    //     cout << "Error creating nonce(sendCertificate)"<<endl;
-    //     ret.success = false;
-    // }
-    // cout<<"Counter created: "<<endl;
-    // BIO_dump_fp(stdout,(char*)counter1,AAD_LEN);
 
     uint32_t counter1 = 0;
 
@@ -1287,6 +1325,12 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
 
     c_counter += 1;
 
+    if (c_counter == 0) {
+        cout << "Client counter reached maximum value, aborting.." << endl;
+        finish();
+        abort();
+    }
+
     cout << "Encrypting the payload" << endl;
     BIO_dump_fp(stdout, (char*)encryptedSignature,msg_to_sign_len+signature_len+AAD_LEN+IV_LEN+16);
 
@@ -1325,6 +1369,12 @@ pipe_ret_t TcpClient::sendAndReceiveSignature() {
     unsigned char* signatureDecrypted = deriveAndDecryptMessage(msg_rec,numOfBytesReceived,mykey_pub,serverDHKey,s_counter);
 
     s_counter += 1;
+
+    if (s_counter == 0) {
+        cout << "Server counter reached maximum value, aborting.." << endl;
+        finish();
+        abort();
+    }
 
     cout << "Number of bytes received is: " << numOfBytesReceived << endl;
     cout << "Dumping the total message received" << endl;
@@ -1465,6 +1515,12 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
 
     s_counter += 1;
 
+    if (s_counter == 0) {
+        cout << "Server counter reached maximum value, aborting.." << endl;
+        finish();
+        abort();
+    }
+
     cout << "Number of bytes received is: " << numOfBytesReceived << endl;
     cout << "Dumping the total message received" << endl;
     BIO_dump_fp(stdout,msg_rec,numOfBytesReceived);
@@ -1602,24 +1658,6 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
     cout << "DH client pubkey: " << pubkeyp2p << endl;
     cout << "Pubkey len: " << pubkey_len_to_send << endl;
 
-
-    // Creting counter for replay attacks 
-    // RAND_poll();
-
-    // unsigned char* counter1 =  new unsigned char[AAD_LEN];
-    // if (!counter1) {
-    //     ret.success = false;
-    //     return ret;
-    // }
-
-    // cout<<"Creating a counter . . ."<<endl;
-    // int result = RAND_bytes(counter1,AAD_LEN);
-    // if (result != 1) {
-    //     cout << "Error creating nonce(sendCertificate)"<<endl;
-    //     ret.success = false;
-    // }
-    // cout<<"Counter created: "<<endl;
-    // BIO_dump_fp(stdout,(char*)counter1,AAD_LEN);
     uint32_t counter1 = 0;
     cout << "Counter: " << counter1 << endl;
 
@@ -1717,6 +1755,13 @@ pipe_ret_t TcpClient::receiveAndSendSignature() {
     auto *encryptedSignature = deriveAndEncryptMessage(reinterpret_cast<char*>(msg_to_send),msg_to_sign_len+signature_len,mykey_pub,serverDHKey,c_counter);
 
     c_counter += 1;
+
+    if (c_counter == 0) {
+        cout << "Client counter reached maximum value, aborting.." << endl;
+        finish();
+        abort();
+    }
+
     cout << "Encrypting the payload" << endl;
     BIO_dump_fp(stdout, (char*)encryptedSignature,msg_to_sign_len+signature_len+AAD_LEN+IV_LEN+16);
 

@@ -50,6 +50,13 @@ void stream2hex(const string str, string& hexstr, bool capital = false)
 void sig_exit(int s)
 {
 	cout << "Closing client..." << std::endl;
+
+    if (client.getChatting() == true) {
+        pipe_ret_t quitRet = client.sendQuitMessage(":QUIT",5);
+        if (quitRet.success == true) cout << "Message sent correctly" << endl;
+        else cout << "Error sending message" << endl;
+    }
+
 	pipe_ret_t finishRet = client.finish();
 	if (finishRet.success) {
 		cout << "Client closed." << std::endl;

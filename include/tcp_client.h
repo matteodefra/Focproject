@@ -128,6 +128,8 @@ public:
 
     void setAndStorePeerKey(unsigned char *key);
 
+    pipe_ret_t sendQuitMessage(const char* msg, size_t size);
+
     void saveMyKey();
 
     unsigned char* insertNonceAccept(string msg);

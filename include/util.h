@@ -230,15 +230,15 @@ int gcm_encrypt(unsigned char *plaintext, size_t plaintext_len,
     }
 
 
-    while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
-        //cout << "Entra nel loop?" << endl;
-        if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
-            std::cout<<"Error in performing encryption"<<std::endl;
-            handleErrors();
-        }
-        ciphertext_len += len;
-        plaintext_len -= len;
-    }
+    // while ( (ciphertext_len < (plaintext_len-8)) && plaintext_len > 8) {
+    //     //cout << "Entra nel loop?" << endl;
+    //     if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, 8)){
+    //         std::cout<<"Error in performing encryption"<<std::endl;
+    //         handleErrors();
+    //     }
+    //     ciphertext_len += len;
+    //     plaintext_len -= len;
+    // }
 
     if(1 != EVP_EncryptUpdate(ctx, ciphertext + ciphertext_len, &len, plaintext + ciphertext_len, plaintext_len)){
         std::cout<<"Error in performing encryption"<<std::endl;
@@ -309,15 +309,15 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
     }
 
 
-    while ( (plaintext_len < (ciphertext_len - 8)) && ciphertext_len > 8) {    
-        //cout << "Entra nel loop?" << endl;
-        if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 8)){
-            std::cout<<"Error in performing encryption"<<std::endl;
-            handleErrors();
-        }
-        plaintext_len += len;
-        ciphertext_len -= len;
-    }
+    // while ( (plaintext_len < (ciphertext_len - 16)) && ciphertext_len > 16) {    
+    //     //cout << "Entra nel loop?" << endl;
+    //     if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, 16)){
+    //         std::cout<<"Error in performing encryption"<<std::endl;
+    //         handleErrors();
+    //     }
+    //     plaintext_len += len;
+    //     ciphertext_len -= len;
+    // }
 
     if(1 != EVP_DecryptUpdate(ctx, plaintext + plaintext_len, &len, ciphertext + plaintext_len, ciphertext_len)){
         std::cout<<"Error in performing encryption"<<std::endl;
@@ -334,10 +334,13 @@ int gcm_decrypt(unsigned char *ciphertext, size_t ciphertext_len,
     //Finalize Encryption
     if(1 != EVP_DecryptFinal(ctx, plaintext + plaintext_len, &len)){
         std::cout<<"Error in finalizing decryption"<<std::endl;
-        handleErrors();
+        // handleErrors();
     }
     plaintext_len += len;
     
+    cout << "Decrypted message: " << endl;
+    BIO_dump_fp(stdout,(char*)plaintext,plaintext_len);
+
     /* Clean up */
     EVP_CIPHER_CTX_free(ctx);
     return plaintext_len;
@@ -464,7 +467,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
 
     // Also this section could be moved in an utility function
     unsigned char msg2[size];
-    strcpy((char*)msg2,msg);
+    // strcpy((char*)msg2,msg);
 
     unsigned char iv_gcm[IV_LEN];
 
@@ -488,7 +491,7 @@ unsigned char* deriveAndEncryptMessage(const char *msg, size_t size, EVP_PKEY* m
     if (!cphr_buf) return nullptr;
     tag_buf = (unsigned char*)malloc(16);
     if (!tag_buf) return nullptr;
-    cphr_len = gcm_encrypt(msg2,pt_len,aad,AAD_LEN,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
+    cphr_len = gcm_encrypt(const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(msg)),pt_len,aad,AAD_LEN,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
 
     auto *buffer = new unsigned char[AAD_LEN/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
 
@@ -683,7 +686,7 @@ unsigned char* deriveAndEncryptPeerMessage(unsigned char *buffer, const char * m
 
     // Also this section could be moved in an utility function
     unsigned char msg2[strlen(msg)];
-    strcpy((char*)msg2,msg);
+    // strcpy((char*)msg2,msg);
 
     unsigned char iv_gcm[IV_LEN];
 
@@ -698,10 +701,10 @@ unsigned char* deriveAndEncryptPeerMessage(unsigned char *buffer, const char * m
     unsigned char *aad = new unsigned char[AAD_LEN+AAD_LEN+size_buffer];
     int start = 0;
 
-    memcpy(aad+start,(char*)&size_buffer,AAD_LEN);
+    memcpy(aad+start,(char*)&counter,AAD_LEN);
     start += AAD_LEN;
 
-    memcpy(aad+start,(char*)&counter,AAD_LEN);
+    memcpy(aad+start,(char*)&size_buffer,AAD_LEN);
     start += AAD_LEN;
 
     memcpy(aad+start,buffer,size_buffer);
@@ -714,12 +717,13 @@ unsigned char* deriveAndEncryptPeerMessage(unsigned char *buffer, const char * m
     unsigned char *tag_buf;
     int cphr_len;
     int pt_len = strlen(msg);
+    cout << "PT len: "<< pt_len << endl;
 
     cphr_buf = (unsigned char*)malloc(strlen(msg));
     if (!cphr_buf) return nullptr;
     tag_buf = (unsigned char*)malloc(16);
     if (!tag_buf) return nullptr;
-    cphr_len = gcm_encrypt(msg2,pt_len,aad,AAD_LEN+AAD_LEN+size_buffer,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
+    cphr_len = gcm_encrypt(const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(msg)),pt_len,aad,AAD_LEN+AAD_LEN+size_buffer,key,iv_gcm,IV_LEN,cphr_buf,tag_buf);
 
     auto *buff = new unsigned char[AAD_LEN+AAD_LEN+size_buffer/*aad_len*/+pt_len+16/*tag_len*/+IV_LEN/*iv_len*/];
 
@@ -738,7 +742,7 @@ unsigned char* deriveAndEncryptPeerMessage(unsigned char *buffer, const char * m
     pos += size_buffer; 
 
     // copy encrypted data
-    memcpy((buff+pos), cphr_buf, cphr_len);
+    memcpy((buff+pos), cphr_buf, pt_len);
     pos += pt_len;
     free(cphr_buf);
 
@@ -855,6 +859,9 @@ unsigned char* deriveAndDecryptPeerMessage(char *msg,int numOfBytesReceived,EVP_
 
     memcpy(total_aad+init,message,payload_size);
 
+    cout << "AAD data: " << endl;
+    BIO_dump_fp(stdout,(char*)total_aad,AAD_LEN+AAD_LEN+payload_size);
+
     
     gcm_decrypt(encryptedData,encrypted_len,total_aad,AAD_LEN+AAD_LEN+payload_size,tag,key,iv_gcm,IV_LEN,plaintext_buffer);
 
@@ -865,13 +872,17 @@ unsigned char* deriveAndDecryptPeerMessage(char *msg,int numOfBytesReceived,EVP_
     auto *ret_buffer = new unsigned char[encrypted_len + AAD_LEN + payload_size];
 
     int fi = 0;
-    memcpy(ret_buffer+pos,plaintext_buffer,encrypted_len);
+    memcpy(ret_buffer+fi,plaintext_buffer,encrypted_len);
     fi += encrypted_len;
 
-    memcpy(ret_buffer+pos,(char*)&payload_size,AAD_LEN);
+    memcpy(ret_buffer+fi,(char*)&payload_size,AAD_LEN);
     fi += AAD_LEN;
 
-    memcpy(ret_buffer+pos,message,payload_size);
+    memcpy(ret_buffer+fi,message,payload_size);
+
+    cout << "Return buffer: " << endl;
+    BIO_dump_fp(stdout,(char*)ret_buffer,encrypted_len+AAD_LEN+payload_size);
+
 
     return ret_buffer;
 

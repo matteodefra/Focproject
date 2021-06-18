@@ -101,6 +101,8 @@ int main() {
     //register to SIGINT to close client when user press ctrl+c
     signal(SIGINT, sig_exit);
  
+    cout << sizeof(unsigned int) << endl;
+
     // configure and register observer
     client_observer_t observer;
     observer.wantedIp = "127.0.0.1";

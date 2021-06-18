@@ -165,7 +165,7 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     cout << "Signature decrypted: " << endl;
                     BIO_dump_fp(stdout,(char*)decryptSignature,decryptLen);
 
-                    // decryptSignature = (unsigned char*)realloc(decryptSignature,decryptLen);
+                    decryptSignature = (unsigned char*)realloc(decryptSignature,decryptLen);
 
                     // cout << "First signature received: " << endl;
                     
@@ -177,9 +177,11 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     cout << "Encrypted signature for other: " << endl;
                     BIO_dump_fp(stdout,(char*)encrypteForPeer,decryptLen+AAD_LEN+IV_LEN+16);
 
+                    cout << "Length of encrypted payload: " << decryptLen + AAD_LEN + 16 + IV_LEN << endl;
+
                     receiver.s_counter += 1;
 
-                    sendToClient(receiver,reinterpret_cast<char*>(encrypteForPeer),decryptLen+AAD_LEN+16+IV_LEN);
+                    send(receiver.getFileDescriptor(),(char*)(encrypteForPeer),decryptLen+AAD_LEN+16+IV_LEN,0);
                     client->authenticationPeer = false;
                 }
                 else {
@@ -187,33 +189,27 @@ void TcpServer::receiveTask(/*TcpServer *context*/) {
                     cout << "server message received:L " << endl;
                     BIO_dump_fp(stdout,msg,numOfBytesReceived);
  
-                    auto *decryptedVal = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH(),client->c_counter);
+                    auto *decryptedVal = deriveAndDecryptPeerMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH(),client->c_counter);
 
-                    client->c_counter ++;
+                    client->c_counter++;
  
-                    sendToClient(receiver,(char*)decryptedVal,strlen((char*)decryptedVal));
-                    /*
-                    if (strncmp((char*)decryptedVal,":FORWARD",8) == 0) {
- 
-
-                    auto *decryptedVal = deriveAndDecryptMessage(msg,numOfBytesReceived, getDHPublicKey(), client->getClientKeyDH(),client->c_counter);
-
-
+                    // sendToClient(receiver,(char*)decryptedVal,strlen((char*)decryptedVal));
+                    
+                    // sendToClient(receiver,msg,numOfBytesReceived);
 
                     if (strncmp((char*)decryptedVal,":FORWARD",8) == 0) {
 
-                        int pos = 0;
+                        int pos = 8;
                         unsigned int pippo;
-                        memcpy((char*)&pippo,decryptedVal+8,AAD_LEN);
-                        pos += 8;
+                        memcpy((char*)&pippo,decryptedVal+pos,AAD_LEN);
                         pos += AAD_LEN;
  
-                        char *message = (char*)decryptedVal+12;
+                        char *message = (char*)decryptedVal+pos;
  
                         cout<<"-----------------"<<endl;
                         cout<<"Successfull verification"<<endl; 
                         sendToClient(receiver,message,pippo);
-                    }*/
+                    }
  
                     // cout<<"-----------------"<<endl;
                     // cout<<"Verify :FORWARD payload"<<endl;
@@ -1128,10 +1124,10 @@ pipe_ret_t TcpServer::verifySignature(Client & client,unsigned char* nonce){
 
         unsigned int pubkey_len;
 
-        memcpy((char*)&pubkey_len,msg_rcved+position_,sizeof(int));
-        position_ += sizeof(int);
+        memcpy((char*)&pubkey_len,msg_rcved+position_,AAD_LEN);
+        position_ += AAD_LEN;
 
-        int clear_buf_len = client.getClientName().size() + NONCE_LEN + NONCE_LEN + AAD_LEN + sizeof(int) + pubkey_len;
+        int clear_buf_len = client.getClientName().size() + NONCE_LEN + NONCE_LEN + AAD_LEN + AAD_LEN + pubkey_len;
         auto *clear_buf = new unsigned char[clear_buf_len];
 
         int signature_len = numOfBytesReceived-clear_buf_len;
@@ -1273,7 +1269,7 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client,unsigned char* nonce2){
     unsigned char* publicKey = pem_serialize_pubkey(getDHPublicKey(),&key_len);
     unsigned int publickey_len = strlen((char*) publicKey);
 
-    int publicKey_msg_len = NONCE_LEN + AAD_LEN + sizeof(int) + publickey_len;
+    int publicKey_msg_len = NONCE_LEN + AAD_LEN + AAD_LEN + publickey_len;
     auto* publicKey_msg = new unsigned char[publicKey_msg_len];
 
     int pos= 0;
@@ -1291,8 +1287,8 @@ pipe_ret_t TcpServer::sendDHPubkey(Client & client,unsigned char* nonce2){
 
     //copy pubkey length
 
-    memcpy(publicKey_msg+pos,(char*)&publickey_len,sizeof(int));
-    pos += sizeof(int);
+    memcpy(publicKey_msg+pos,(char*)&publickey_len,AAD_LEN);
+    pos += AAD_LEN;
 
     //copy pubkey
     memcpy(publicKey_msg+pos,publicKey,publickey_len);

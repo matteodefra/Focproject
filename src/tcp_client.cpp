@@ -47,10 +47,13 @@ unsigned char* TcpClient::pswHash(string msg, bool reg){
     if(reg == false) c_msg =(char*)credentials.at(1).c_str();
         else c_msg =(char*)credentials.at(2).c_str();
 
+    cout<<"To Hash: "<<endl;
+    cout<<"-"<<c_msg<<"-"<<endl;
+
     const EVP_MD* hash_function = EVP_sha256();
     unsigned int digest_len;
 
-    unsigned char* digest = new unsigned char[EVP_MD_size(hash_function)];//(unsigned char*)malloc(EVP_MD_size(hash_function));
+    unsigned char* digest = new unsigned char[EVP_MD_size(hash_function)+1];
 
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     EVP_DigestInit(ctx,hash_function);
@@ -58,6 +61,7 @@ unsigned char* TcpClient::pswHash(string msg, bool reg){
     EVP_DigestFinal(ctx,digest,&digest_len);
 
     EVP_MD_CTX_free(ctx);
+    digest[32] ='\0';
 
     return digest;
 }

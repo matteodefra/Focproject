@@ -312,6 +312,11 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
     pipe_ret_t ret;
 
     if (getChatting()) {
+        bool isQuitting = false;
+
+        if (strncmp(msg,":QUIT",5)==0) {
+            isQuitting = true;
+        }
  
         auto *buffer = deriveAndEncryptMessage(msg,size,mypubkey_p2p,peerKey,myPeerCounter);
  
@@ -358,6 +363,15 @@ pipe_ret_t TcpClient::sendMsg(const char * msg, size_t size) {
             return ret;
         }
         ret.success = true;
+
+        if (isQuitting == true) {
+            //Client quitted the challenge
+            cout << "Quitting the challenge.." << endl;
+            finish();
+            sleep(1);
+            exit(EXIT_SUCCESS);
+        }
+
         return ret;
  
     }
@@ -1063,7 +1077,7 @@ void TcpClient::processRequest(unsigned char* plaintext_buffer, int receivedByte
         cout << "The other client closed connection or quitted the request" << endl;
         sleep(2);
         finish();
-        abort();
+        exit(EXIT_SUCCESS);
     }
 
     if (strncmp(message,":KEY",4) == 0) {
